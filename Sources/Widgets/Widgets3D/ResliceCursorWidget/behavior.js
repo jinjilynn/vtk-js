@@ -1,7 +1,6 @@
 import macro from 'vtk.js/Sources/macros';
 import vtkBoundingBox from 'vtk.js/Sources/Common/DataModel/BoundingBox';
 import vtkLine from 'vtk.js/Sources/Common/DataModel/Line';
-import vtkPlaneManipulator from 'vtk.js/Sources/Widgets/Manipulators/PlaneManipulator';
 import * as vtkMath from 'vtk.js/Sources/Common/Core/Math';
 
 import {
@@ -11,13 +10,13 @@ import {
   getOtherLineName,
   getLinePlaneName,
   getLineInPlaneName,
+  getLineNames,
 } from 'vtk.js/Sources/Widgets/Widgets3D/ResliceCursorWidget/helpers';
 
 import {
   ScrollingMethods,
   InteractionMethodsName,
   planeNameToViewType,
-  lineNames,
 } from 'vtk.js/Sources/Widgets/Widgets3D/ResliceCursorWidget/Constants';
 
 export default function widgetBehavior(publicAPI, model) {
@@ -63,7 +62,7 @@ export default function widgetBehavior(publicAPI, model) {
    * @returns 'YinX', 'ZinX', 'XinY', 'ZinY', 'XinZ' or 'YinZ'
    */
   publicAPI.getActiveLineName = () =>
-    lineNames.find((lineName) =>
+    getLineNames(model.widgetState).find((lineName) =>
       model.widgetState.getStatesWithLabel(lineName).includes(model.activeState)
     );
 
@@ -77,19 +76,30 @@ export default function widgetBehavior(publicAPI, model) {
    * @returns ZinX if lineName == YinX, YinX if lineName == ZinX, ZinY if lineName == XinY...
    */
   publicAPI.getOtherLineHandle = (lineName) =>
-    model.widgetState[`getAxis${getOtherLineName(lineName)}`]?.();
+    model.widgetState[
+      `getAxis${getOtherLineName(model.widgetState, lineName)}`
+    ]?.();
 
   // FIXME: label information should be accessible from activeState instead of parent state.
   /**
    * There are 2 rotation handles per axis: 'point0' and 'point1'.
    * This function returns which rotation handle (point0 or point1) is currently active.
    * ActiveState must be a RotationHandle.
-   * @returns 'point0' or 'point1'
+   * @returns 'point0', 'point1' or null if no point is active (e.g. line is being rotated)
    */
-  publicAPI.getActiveRotationPointName = () =>
-    model.widgetState.getStatesWithLabel('point0').includes(model.activeState)
-      ? 'point0'
-      : 'point1';
+  publicAPI.getActiveRotationPointName = () => {
+    if (
+      model.widgetState.getStatesWithLabel('point0').includes(model.activeState)
+    ) {
+      return 'point0';
+    }
+    if (
+      model.widgetState.getStatesWithLabel('point1').includes(model.activeState)
+    ) {
+      return 'point1';
+    }
+    return null;
+  };
 
   publicAPI.startScrolling = (newPosition) => {
     if (newPosition) {
@@ -126,9 +136,11 @@ export default function widgetBehavior(publicAPI, model) {
       model._isDragging = true;
       const viewType = model.viewType;
       const currentPlaneNormal = model.widgetState.getPlanes()[viewType].normal;
-      model.planeManipulator.setWidgetOrigin(model.widgetState.getCenter());
-      model.planeManipulator.setWidgetNormal(currentPlaneNormal);
-      const worldCoords = model.planeManipulator.handleEvent(
+      const manipulator =
+        model.activeState?.getManipulator?.() ?? model.manipulator;
+      manipulator.setWidgetOrigin(model.widgetState.getCenter());
+      manipulator.setWidgetNormal(currentPlaneNormal);
+      const { worldCoords } = manipulator.handleEvent(
         callData,
         model._apiSpecificRenderWindow
       );
@@ -305,42 +317,58 @@ export default function widgetBehavior(publicAPI, model) {
 
     // Translate the current line along the other line
     const otherLineHandle = publicAPI.getOtherLineHandle(lineName);
-    const otherLineVector = otherLineHandle.getDirection();
-    vtkMath.normalize(otherLineVector);
-    const axisTranslation = otherLineVector;
+    const center = model.widgetState.getCenter();
+    const manipulator =
+      model.activeState?.getManipulator?.() ?? model.manipulator;
+    let worldCoords = null;
+    let newOrigin = [];
+    if (model.activeState?.getManipulator?.()) {
+      worldCoords = manipulator.handleEvent(
+        calldata,
+        model._apiSpecificRenderWindow
+      ).worldCoords;
+      const translation = vtkMath.subtract(worldCoords, previousPosition, []);
+      vtkMath.add(center, translation, newOrigin);
+    } else if (otherLineHandle) {
+      const otherLineVector = otherLineHandle.getDirection();
+      vtkMath.normalize(otherLineVector);
+      const axisTranslation = otherLineVector;
 
-    const dot = vtkMath.dot(currentLineVector, otherLineVector);
-    // lines are colinear, translate along perpendicular axis from current line
-    if (dot === 1 || dot === -1) {
-      vtkMath.cross(
-        currentLineVector,
-        model.planeManipulator.getWidgetNormal(),
+      const dot = vtkMath.dot(currentLineVector, otherLineVector);
+      // lines are colinear, translate along perpendicular axis from current line
+      if (dot === 1 || dot === -1) {
+        vtkMath.cross(
+          currentLineVector,
+          manipulator.getWidgetNormal(),
+          axisTranslation
+        );
+      }
+
+      const closestPoint = [];
+      worldCoords = manipulator.handleEvent(
+        calldata,
+        model._apiSpecificRenderWindow
+      ).worldCoords;
+      vtkLine.distanceToLine(
+        worldCoords,
+        lineHandle.getOrigin(),
+        pointOnLine,
+        closestPoint
+      );
+
+      const translationVector = vtkMath.subtract(worldCoords, closestPoint, []);
+      const translationDistance = vtkMath.dot(
+        translationVector,
         axisTranslation
       );
+
+      newOrigin = vtkMath.multiplyAccumulate(
+        center,
+        axisTranslation,
+        translationDistance,
+        newOrigin
+      );
     }
-
-    const closestPoint = [];
-    const worldCoords = model.planeManipulator.handleEvent(
-      calldata,
-      model._apiSpecificRenderWindow
-    );
-    vtkLine.distanceToLine(
-      worldCoords,
-      lineHandle.getOrigin(),
-      pointOnLine,
-      closestPoint
-    );
-
-    const translationVector = vtkMath.subtract(worldCoords, closestPoint, []);
-    const translationDistance = vtkMath.dot(translationVector, axisTranslation);
-
-    const center = model.widgetState.getCenter();
-    let newOrigin = vtkMath.multiplyAccumulate(
-      center,
-      axisTranslation,
-      translationDistance,
-      [0, 0, 0]
-    );
     newOrigin = publicAPI.getBoundedCenter(newOrigin);
     model.widgetState.setCenter(newOrigin);
     updateState(
@@ -348,6 +376,7 @@ export default function widgetBehavior(publicAPI, model) {
       model._factory.getScaleInPixels(),
       model._factory.getRotationHandlePosition()
     );
+    previousPosition = worldCoords;
   };
 
   publicAPI.getBoundedCenter = (newCenter) => {
@@ -362,7 +391,9 @@ export default function widgetBehavior(publicAPI, model) {
   };
 
   publicAPI[InteractionMethodsName.TranslateCenter] = (calldata) => {
-    const worldCoords = model.planeManipulator.handleEvent(
+    const manipulator =
+      model.activeState?.getManipulator?.() ?? model.manipulator;
+    const { worldCoords } = manipulator.handleEvent(
       calldata,
       model._apiSpecificRenderWindow
     );
@@ -380,22 +411,29 @@ export default function widgetBehavior(publicAPI, model) {
 
   publicAPI[InteractionMethodsName.RotateLine] = (calldata) => {
     const activeLineHandle = publicAPI.getActiveLineHandle();
-    const planeNormal = model.planeManipulator.getWidgetNormal();
-    const worldCoords = model.planeManipulator.handleEvent(
+    const manipulator =
+      model.activeState?.getManipulator?.() ?? model.manipulator;
+    const planeNormal = manipulator.getWidgetNormal();
+    const { worldCoords } = manipulator.handleEvent(
       calldata,
       model._apiSpecificRenderWindow
     );
 
     const center = model.widgetState.getCenter();
-    const previousLineDirection = activeLineHandle.getDirection();
-    vtkMath.normalize(previousLineDirection);
-    if (publicAPI.getActiveRotationPointName() === 'point1') {
-      vtkMath.multiplyScalar(previousLineDirection, -1);
-    }
-
     const currentVectorToOrigin = [0, 0, 0];
     vtkMath.subtract(worldCoords, center, currentVectorToOrigin);
     vtkMath.normalize(currentVectorToOrigin);
+
+    const previousLineDirection = activeLineHandle.getDirection();
+    vtkMath.normalize(previousLineDirection);
+    const activePointName = publicAPI.getActiveRotationPointName();
+    if (
+      activePointName === 'point1' ||
+      (!activePointName &&
+        vtkMath.dot(currentVectorToOrigin, previousLineDirection) < 0)
+    ) {
+      vtkMath.multiplyScalar(previousLineDirection, -1);
+    }
 
     const radianAngle = vtkMath.signedAngleBetweenVectors(
       previousLineDirection,
@@ -418,7 +456,7 @@ export default function widgetBehavior(publicAPI, model) {
     publicAPI.rotatePlane(viewType, radianAngle, planeNormal);
 
     if (publicAPI.getKeepOrthogonality()) {
-      const otherLineName = getOtherLineName(lineName);
+      const otherLineName = getOtherLineName(model.widgetState, lineName);
       const otherPlaneName = getLinePlaneName(otherLineName);
       publicAPI.rotatePlane(
         planeNameToViewType[otherPlaneName],
@@ -453,6 +491,4 @@ export default function widgetBehavior(publicAPI, model) {
   // --------------------------------------------------------------------------
   // initialization
   // --------------------------------------------------------------------------
-
-  model.planeManipulator = vtkPlaneManipulator.newInstance();
 }
