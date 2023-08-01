@@ -53,6 +53,13 @@ function vtkMapper(publicAPI, model) {
     // make sure we do NOT call modified()
   };
 
+  publicAPI.setSelectionWebGLIdsToVTKIds = (selectionWebGLIdsToVTKIds) => {
+    model.selectionWebGLIdsToVTKIds = selectionWebGLIdsToVTKIds;
+    // make sure we do NOT call modified()
+    // this attribute is only used when processing a selection made with the hardware selector
+    // the mtime of the mapper doesn't need to be changed
+  };
+
   publicAPI.createDefaultLookupTable = () => {
     model.lookupTable = vtkLookupTable.newInstance();
   };
@@ -324,13 +331,16 @@ function vtkMapper(publicAPI, model) {
       if (numberOfColors > 4094) {
         numberOfColors = 4094;
       }
+      if (numberOfColors < 64) {
+        numberOfColors = 64;
+      }
       numberOfColors += 2;
-      const k = (range[1] - range[0]) / (numberOfColors - 1 - 2);
+      const k = (range[1] - range[0]) / (numberOfColors - 2);
 
       const newArray = new Float64Array(numberOfColors * 2);
 
       for (let i = 0; i < numberOfColors; ++i) {
-        newArray[i] = range[0] + i * k - k; // minus k to start at below range color
+        newArray[i] = range[0] + i * k - k / 2.0; // minus k / 2 to start at below range color
         if (useLogScale) {
           newArray[i] = 10.0 ** newArray[i];
         }
@@ -627,6 +637,7 @@ export function extend(publicAPI, model, initialValues = {}) {
     'colorCoordinates',
     'colorMapColors',
     'colorTextureMap',
+    'selectionWebGLIdsToVTKIds',
   ]);
   macro.setGet(publicAPI, model, [
     'colorByArrayName',
@@ -639,7 +650,6 @@ export function extend(publicAPI, model, initialValues = {}) {
     'renderTime',
     'scalarMode',
     'scalarVisibility',
-    'selectionWebGLIdsToVTKIds',
     'static',
     'useLookupTableScalarRange',
     'customShaderAttributes', // point data array names that will be transferred to the VBO

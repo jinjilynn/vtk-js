@@ -1,8 +1,8 @@
 import '@kitware/vtk.js/favicon';
-import { mat3 } from 'gl-matrix';
 
 // Load the rendering pieces we want to use (for both WebGL and WebGPU)
 import '@kitware/vtk.js/Rendering/Profiles/Volume';
+import '@kitware/vtk.js/Rendering/Profiles/Geometry';
 
 // Force the loading of HttpDataAccessHelper to support gzip decompression
 import '@kitware/vtk.js/IO/Core/DataAccessHelper/HttpDataAccessHelper';
@@ -10,6 +10,11 @@ import '@kitware/vtk.js/IO/Core/DataAccessHelper/HttpDataAccessHelper';
 import vtkHttpDataSetReader from '@kitware/vtk.js/IO/Core/HttpDataSetReader';
 
 import vtkProxyManager from '@kitware/vtk.js/Proxy/Core/ProxyManager';
+
+import vtkPlaneWidget from '@kitware/vtk.js/Widgets/Widgets3D/ImplicitPlaneWidget';
+import vtkWidgetManager from '@kitware/vtk.js/Widgets/Core/WidgetManager';
+import { SlabTypes } from 'vtk.js/Sources/Rendering/Core/ImageResliceMapper/Constants';
+
 import proxyConfiguration from './proxy';
 
 // ----------------------------------------------------------------------------
@@ -78,6 +83,73 @@ fitCameraButton.addEventListener('click', () => {
 
 resetCameraButton.addEventListener('click', view2DProxy.resetCamera);
 
+view2DProxy.getRenderer().setBackground([65 / 255, 85 / 255, 122 / 255]);
+
+const widgetManager = vtkWidgetManager.newInstance();
+widgetManager.setRenderer(view2DProxy.getRenderer());
+
+const repStyle = {
+  active: {
+    plane: {
+      opacity: 0.05,
+      color: [1, 1, 1],
+    },
+    normal: {
+      opacity: 0.6,
+      color: [0, 1, 0],
+    },
+    origin: {
+      opacity: 0.6,
+      color: [0, 1, 0],
+    },
+  },
+  inactive: {
+    plane: {
+      opacity: 0.0,
+      color: [1, 1, 1],
+    },
+    normal: {
+      opacity: 0.3,
+      color: [0.5, 0, 0],
+    },
+    origin: {
+      opacity: 0.3,
+      color: [0.5, 0, 0],
+    },
+  },
+};
+
+const widget = vtkPlaneWidget.newInstance();
+widget.getWidgetState().setNormal(0, 0, 1);
+widget.setPlaceFactor(1);
+const w = widgetManager.addWidget(widget);
+w.setRepresentationStyle(repStyle);
+
+// ----------------------------------------------------------------------------
+// Define widget setup
+// ----------------------------------------------------------------------------
+function setupWidget(im, rep) {
+  const bds = im.getBounds();
+  const imc = im.getCenter();
+  const slicePlane = rep.getSlicePlane();
+  slicePlane.setOrigin(imc);
+  slicePlane.setNormal(0, 1, 0);
+  widget.placeWidget(bds);
+
+  const renderer = view2DProxy.getRenderer();
+  renderer.getActiveCamera().setFocalPoint(...imc);
+  renderer.getActiveCamera().setViewUp([0, 0, -1]);
+  const planeState = widget.getWidgetState();
+  planeState.setOrigin(slicePlane.getOrigin());
+  planeState.setNormal(slicePlane.getNormal());
+  planeState.onModified(() => {
+    slicePlane.setOrigin(planeState.getOrigin());
+    slicePlane.setNormal(planeState.getNormal());
+  });
+  const renderWindow = view2DProxy.getRenderWindow();
+  renderWindow.render();
+}
+
 // ----------------------------------------------------------------------------
 // Create source proxy
 // ----------------------------------------------------------------------------
@@ -97,24 +169,19 @@ imageDataPromise.then((imageData) => {
     view2DProxy
   );
 
-  // Scrolling through the slices shows that the bounding box of the volume fits perfectly in the view
+  setupWidget(imageData, representation2DProxy);
+  representation2DProxy.setSlicePolyData(null);
+  representation2DProxy.setSlabThickness(30);
+  representation2DProxy.setSlabTrapezoidIntegration(1.5);
+  representation2DProxy.setSlabType(SlabTypes.MAX);
 
-  // Rotate the prop
-  const prop = representation2DProxy.getActors()[0];
-  prop.rotateY(40);
-  prop.rotateX(25);
-  prop.rotateZ(10);
-
-  // Rotate the imageData
-  imageData.setDirection(mat3.fromRotation([], 0.6));
-
+  view2DProxy.setFitProps(false);
   view2DProxy.resetCamera();
 });
-
-view2DProxy.getRenderer().setBackground([65 / 255, 85 / 255, 122 / 255]);
 
 global.mainContainer = mainContainer;
 global.proxyManager = proxyManager;
 global.sourceProxy = sourceProxy;
 global.view2DProxy = view2DProxy;
 global.representation2DProxy = representation2DProxy;
+global.widget = w;

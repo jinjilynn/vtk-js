@@ -67,13 +67,14 @@ function vtkLookupTable(publicAPI, model) {
   // Apply shift/scale to the scalar value v and return the index.
   publicAPI.linearIndexLookup = (v, p) => {
     let dIndex = 0;
+    const nv = Number(v);
 
-    if (v < p.range[0]) {
+    if (nv < p.range[0]) {
       dIndex = p.maxIndex + BELOW_RANGE_COLOR_INDEX + 1.5;
-    } else if (v > p.range[1]) {
+    } else if (nv > p.range[1]) {
       dIndex = p.maxIndex + ABOVE_RANGE_COLOR_INDEX + 1.5;
     } else {
-      dIndex = (v + p.shift) * p.scale;
+      dIndex = (nv + p.shift) * p.scale;
 
       // This conditional is needed because when v is very close to
       // p.Range[1], it may map above p.MaxIndex in the linear mapping
@@ -219,13 +220,40 @@ function vtkLookupTable(publicAPI, model) {
   };
 
   publicAPI.setTable = (table) => {
+    // Handle JS array (assume 2D array)
+    if (Array.isArray(table)) {
+      const nbComponents = table[0].length;
+      model.numberOfColors = table.length;
+      const colorOffset = 4 - nbComponents;
+      let offset = 0;
+      // fill table
+      for (let i = 0; i < model.numberOfColors; i++) {
+        model.table[i * 4] = 255;
+        model.table[i * 4 + 1] = 255;
+        model.table[i * 4 + 2] = 255;
+        model.table[i * 4 + 3] = 255;
+      }
+      // extract colors
+      for (let i = 0; i < table.length; i++) {
+        const color = table[i];
+        for (let j = 0; j < nbComponents; j++) {
+          model.table[offset++] = color[j];
+        }
+        offset += colorOffset;
+      }
+      publicAPI.buildSpecialColors();
+      model.insertTime.modified();
+      publicAPI.modified();
+      return true;
+    }
+
     if (table.getNumberOfComponents() !== 4) {
       vtkErrorMacro('Expected 4 components for RGBA colors');
-      return;
+      return false;
     }
     if (table.getDataType() !== VtkDataTypes.UNSIGNED_CHAR) {
       vtkErrorMacro('Expected unsigned char values for RGBA colors');
-      return;
+      return false;
     }
     model.numberOfColors = table.getNumberOfTuples();
     const data = table.getData();
@@ -237,6 +265,7 @@ function vtkLookupTable(publicAPI, model) {
     publicAPI.buildSpecialColors();
     model.insertTime.modified();
     publicAPI.modified();
+    return true;
   };
 
   publicAPI.buildSpecialColors = () => {
@@ -294,6 +323,9 @@ function vtkLookupTable(publicAPI, model) {
   };
 
   if (model.table.length > 0) {
+    // Ensure that special colors are properly included in the table
+    publicAPI.buildSpecialColors();
+
     // ensure insertTime is more recently modified than buildTime if
     // a table is provided via the constructor
     model.insertTime.modified();

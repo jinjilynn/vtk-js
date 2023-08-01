@@ -58,7 +58,9 @@ const {
   fileURL = 'https://data.kitware.com/api/v1/file/59de9dca8d777f31ac641dc2/download',
   xrSessionType = null,
   colorPreset = null,
-  resliceVolume = true,
+  rotateX = 0,
+  rotateY = 0,
+  rotateZ = 0,
 } = vtkURLExtract.extractURLParameters();
 
 // Validate input parameters
@@ -83,13 +85,13 @@ if (requestedXrSessionType === XrSessionTypes.LookingGlassVR) {
     new obj.LookingGlassWebXRPolyfill();
   });
 } else if (requestedXrSessionType === null) {
-  // Determine supported session type
-  navigator.xr.isSessionSupported('immersive-ar').then((arSupported) => {
-    if (arSupported) {
-      requestedXrSessionType = XrSessionTypes.MobileAR;
+  // Guess the session type based on what XR session(s) the device supports.
+  navigator.xr.isSessionSupported('immersive-vr').then((vrSupported) => {
+    if (vrSupported) {
+      requestedXrSessionType = XrSessionTypes.HmdVr;
     } else {
-      navigator.xr.isSessionSupported('immersive-vr').then((vrSupported) => {
-        requestedXrSessionType = vrSupported ? XrSessionTypes.HmdVR : null;
+      navigator.xr.isSessionSupported('immersive-ar').then((arSupported) => {
+        requestedXrSessionType = arSupported ? XrSessionTypes.MobileAR : null;
       });
     }
   });
@@ -99,14 +101,35 @@ HttpDataAccessHelper.fetchBinary(fileURL).then((fileContents) => {
   // Read data
   vtiReader.parseAsArrayBuffer(fileContents);
 
-  if (resliceVolume) {
-    // Rotate 90 degrees forward so that default head volume faces camera
-    const rotateX = mat4.create();
-    mat4.fromRotation(rotateX, vtkMath.radiansFromDegrees(90), [-1, 0, 0]);
-    reslicer.setResliceAxes(rotateX);
-  } else {
-    reslicer.setResliceAxes(mat4.create());
+  const resliceRotation = mat4.create();
+  if (rotateX) {
+    const rotateXMat = mat4.create();
+    mat4.fromRotation(
+      rotateXMat,
+      vtkMath.radiansFromDegrees(rotateX),
+      [1, 0, 0]
+    );
+    mat4.multiply(resliceRotation, resliceRotation, rotateXMat);
   }
+  if (rotateY) {
+    const rotateYMat = mat4.create();
+    mat4.fromRotation(
+      rotateYMat,
+      vtkMath.radiansFromDegrees(rotateY),
+      [0, 1, 0]
+    );
+    mat4.multiply(resliceRotation, resliceRotation, rotateYMat);
+  }
+  if (rotateZ) {
+    const rotateZMat = mat4.create();
+    mat4.fromRotation(
+      rotateZMat,
+      vtkMath.radiansFromDegrees(rotateZ),
+      [0, 0, 1]
+    );
+    mat4.multiply(resliceRotation, resliceRotation, rotateZMat);
+  }
+  reslicer.setResliceAxes(resliceRotation);
 
   const data = reslicer.getOutputData(0);
   const dataArray =
@@ -126,11 +149,12 @@ HttpDataAccessHelper.fetchBinary(fileURL).then((fileContents) => {
 
   // https://github.com/Kitware/VolView/blob/f6b1aaa587d1a80ccd99dd9fbab309c58cde08f7/src/vtk/MedicalColorPresets.json
   if (colorPreset === 'CT-AAA') {
+    // Colors adjusted from VolView defaults to reduce apparent oversaturation in AR scenes
     ctfun.addRGBPoint(-3024, 0.0, 0, 0);
     ctfun.addRGBPoint(143, 0.62, 0.36, 0.18);
-    ctfun.addRGBPoint(166, 0.88, 0.6, 0.29);
-    ctfun.addRGBPoint(214, 1, 1, 1);
-    ctfun.addRGBPoint(419, 1, 0.94, 0.95);
+    ctfun.addRGBPoint(166, 0.68, 0.6, 0.34);
+    ctfun.addRGBPoint(214, 0.7, 0.7, 0.7);
+    ctfun.addRGBPoint(419, 0.9, 0.84, 0.85);
     ctfun.addRGBPoint(3071, 0.83, 0.66, 1);
 
     ofun.addPoint(-3024, 0);
@@ -139,6 +163,16 @@ HttpDataAccessHelper.fetchBinary(fileURL).then((fileContents) => {
     ofun.addPoint(214, 0.7);
     ofun.addPoint(420, 0.83);
     ofun.addPoint(3071, 0.8);
+  } else if (colorPreset === 'CT-Bone') {
+    ctfun.addRGBPoint(-3024, 0, 0, 0);
+    ctfun.addRGBPoint(-16.4458, 0.729412, 0.254902, 0.301961);
+    ctfun.addRGBPoint(641.385, 0.905882, 0.815686, 0.552941);
+    ctfun.addRGBPoint(3071.0, 1.0, 1.0, 1.0);
+
+    ofun.addPoint(-3024, 0);
+    ofun.addPoint(-16.4458, 0);
+    ofun.addPoint(641.385, 0.715686);
+    ofun.addPoint(3071, 0.705882);
   } else if (colorPreset === 'CT-Cardiac2') {
     ctfun.addRGBPoint(-3024, 0.0, 0, 0);
     ctfun.addRGBPoint(42, 0.55, 0.25, 0.15);
@@ -153,6 +187,18 @@ HttpDataAccessHelper.fetchBinary(fileURL).then((fileContents) => {
     ofun.addPoint(277, 0.78);
     ofun.addPoint(1587, 0.75);
     ofun.addPoint(3071, 0.8);
+  } else if (colorPreset === 'CT-Chest-Contrast-Enhanced') {
+    ctfun.addRGBPoint(-3024, 0, 0, 0);
+    ctfun.addRGBPoint(67.0106, 0.54902, 0.25098, 0.14902);
+    ctfun.addRGBPoint(251.105, 0.882353, 0.603922, 0.290196);
+    ctfun.addRGBPoint(439.291, 1.0, 0.937033, 0.954531);
+    ctfun.addRGBPoint(3071.0, 0.827451, 0.658824, 1.0);
+
+    ofun.addPoint(-3024, 0);
+    ofun.addPoint(67.0106, 0);
+    ofun.addPoint(251.105, 0.446429);
+    ofun.addPoint(439.291, 0.625);
+    ofun.addPoint(3071, 0.616071);
   } else {
     // Scale color and opacity transfer functions to data intensity range
     ctfun.addRGBPoint(dataRange[0], 0.0, 0.3, 0.3);
