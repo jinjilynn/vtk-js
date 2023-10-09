@@ -11,7 +11,11 @@ const { vtkWarningMacro, vtkErrorMacro, normalizeWheel, vtkOnceErrorMacro } =
 // Global methods
 // ----------------------------------------------------------------------------
 
-const EMPTY_MOUSE_EVENT = new MouseEvent('');
+const EMPTY_MOUSE_EVENT = {
+  ctrlKey: false,
+  altKey: false,
+  shiftKey: false,
+};
 
 const deviceInputMap = {
   'xr-standard': [
@@ -168,7 +172,7 @@ function vtkRenderWindowInteractor(publicAPI, model) {
     return model.currentRenderer;
   };
 
-  function getScreenEventPositionFor(source) {
+  function _getScreenEventPositionFor(source) {
     const canvas = model._view.getCanvas();
     const bounds = canvas.getBoundingClientRect();
     const scaleX = canvas.width / bounds.width;
@@ -185,6 +189,9 @@ function vtkRenderWindowInteractor(publicAPI, model) {
     }
     return position;
   }
+  // Allow user to override it
+  const getScreenEventPositionFor =
+    model._getScreenEventPositionFor || _getScreenEventPositionFor;
 
   function getModifierKeysFor(event) {
     return {
@@ -430,7 +437,7 @@ function vtkRenderWindowInteractor(publicAPI, model) {
   };
 
   //----------------------------------------------------------------------
-  publicAPI.exitPointerLock = () => document.exitPointerLock();
+  publicAPI.exitPointerLock = () => document.exitPointerLock?.();
 
   //----------------------------------------------------------------------
   publicAPI.isPointerLocked = () =>
