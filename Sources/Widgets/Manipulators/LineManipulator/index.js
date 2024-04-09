@@ -2,6 +2,7 @@ import macro from 'vtk.js/Sources/macros';
 import * as vtkMath from 'vtk.js/Sources/Common/Core/Math';
 
 import vtkAbstractManipulator from 'vtk.js/Sources/Widgets/Manipulators/AbstractManipulator';
+import { EPSILON } from 'vtk.js/Sources/Common/Core/Math/Constants';
 
 export function projectDisplayToLine(
   x,
@@ -11,6 +12,14 @@ export function projectDisplayToLine(
   renderer,
   glRenderWindow
 ) {
+  // if the active camera viewPlaneNormal and line direction are parallel, no change is allowed
+  const dotProduct = Math.abs(
+    vtkMath.dot(renderer.getActiveCamera().getViewPlaneNormal(), lineDirection)
+  );
+
+  if (1 - dotProduct < EPSILON) {
+    return [];
+  }
   const near = glRenderWindow.displayToWorld(x, y, 0, renderer);
   const far = glRenderWindow.displayToWorld(x, y, 1, renderer);
   const viewDir = [0, 0, 0];
@@ -27,7 +36,12 @@ export function projectDisplayToLine(
   const denominator = vtkMath.dot(normal, lineDirection);
 
   const result = lineDirection.slice();
-  vtkMath.multiplyScalar(result, numerator / denominator);
+  if (denominator === 0) {
+    // no change is allowed
+    vtkMath.multiplyScalar(result, 0);
+  } else {
+    vtkMath.multiplyScalar(result, numerator / denominator);
+  }
   vtkMath.add(lineOrigin, result, result);
 
   return result;

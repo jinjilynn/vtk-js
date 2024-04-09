@@ -5,7 +5,7 @@ import Constants from 'vtk.js/Sources/Widgets/Core/WidgetManager/Constants';
 import { WIDGET_PRIORITY } from 'vtk.js/Sources/Widgets/Core/AbstractWidget/Constants';
 
 const { ViewTypes, RenderingTypes, CaptureOn } = Constants;
-const { vtkErrorMacro, vtkWarningMacro } = macro;
+const { vtkErrorMacro } = macro;
 
 let viewIdCount = 1;
 
@@ -151,7 +151,12 @@ function vtkWidgetManager(publicAPI, model) {
     }
 
     // Default cursor behavior
-    model._apiSpecificRenderWindow.setCursor(widget ? 'pointer' : 'default');
+    const cursorStyles = publicAPI.getCursorStyles();
+    const style = widget ? 'hover' : 'default';
+    const cursor = cursorStyles[style];
+    if (cursor) {
+      model._apiSpecificRenderWindow.setCursor(cursor);
+    }
 
     model.activeWidget = null;
     let wantRender = false;
@@ -206,22 +211,23 @@ function vtkWidgetManager(publicAPI, model) {
 
   async function captureBuffers(x1, y1, x2, y2) {
     if (model._captureInProgress) {
+      await model._captureInProgress;
       return;
     }
-    model._captureInProgress = true;
     renderPickingBuffer();
 
     model._capturedBuffers = null;
-    model._capturedBuffers = await model._selector.getSourceDataAsync(
+    model._captureInProgress = model._selector.getSourceDataAsync(
       model._renderer,
       x1,
       y1,
       x2,
       y2
     );
+    model._capturedBuffers = await model._captureInProgress;
+    model._captureInProgress = null;
     model.previousSelectedData = null;
     renderFrontBuffer();
-    model._captureInProgress = false;
   }
 
   publicAPI.enablePicking = () => {
@@ -393,31 +399,6 @@ function vtkWidgetManager(publicAPI, model) {
     return publicAPI.getSelectedData();
   };
 
-  publicAPI.updateSelectionFromXY = (x, y) => {
-    vtkWarningMacro(
-      'updateSelectionFromXY is deprecated, please use getSelectedDataForXY'
-    );
-    if (model.pickingEnabled) {
-      // Then pick regular representations.
-      if (model.captureOn === CaptureOn.MOUSE_MOVE) {
-        captureBuffers(x, y, x, y);
-      }
-    }
-  };
-
-  publicAPI.updateSelectionFromMouseEvent = (event) => {
-    vtkWarningMacro(
-      'updateSelectionFromMouseEvent is deprecated, please use getSelectedDataForXY'
-    );
-    const { pageX, pageY } = event;
-    const { top, left, height } = model._apiSpecificRenderWindow
-      .getCanvas()
-      .getBoundingClientRect();
-    const x = pageX - left;
-    const y = height - (pageY - top);
-    publicAPI.updateSelectionFromXY(x, y);
-  };
-
   publicAPI.getSelectedData = () => {
     if (!model.selections || !model.selections.length) {
       model.previousSelectedData = null;
@@ -485,7 +466,7 @@ function vtkWidgetManager(publicAPI, model) {
 // Object factory
 // ----------------------------------------------------------------------------
 
-const DEFAULT_VALUES = {
+const defaultValues = (initialValues = {}) => ({
   // _camera: null,
   // _selector: null,
   // _currentUpdateSelectionCallID: null,
@@ -500,16 +481,25 @@ const DEFAULT_VALUES = {
   previousSelectedData: null,
   widgetInFocus: null,
   captureOn: CaptureOn.MOUSE_MOVE,
-};
+  ...initialValues,
+
+  cursorStyles: initialValues.cursorStyles
+    ? { ...initialValues.cursorStyles }
+    : {
+        default: 'default',
+        hover: 'pointer',
+      },
+});
 
 // ----------------------------------------------------------------------------
 
 export function extend(publicAPI, model, initialValues = {}) {
-  Object.assign(model, DEFAULT_VALUES, initialValues);
+  Object.assign(model, defaultValues(initialValues));
 
   macro.obj(publicAPI, model);
   macro.setGet(publicAPI, model, [
     'captureOn',
+    'cursorStyles',
     { type: 'enum', name: 'viewType', enum: ViewTypes },
   ]);
   macro.get(publicAPI, model, [

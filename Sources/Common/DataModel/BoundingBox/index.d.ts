@@ -202,7 +202,7 @@ export function getMaxPoint(bounds: Bounds): Vector3;
 export function getCorners(bounds: Bounds, corners: Vector3[]): Vector3[];
 
 /**
- * Computes the two corner poitns with min and max coords.
+ * Computes the two corner points with min and max coords.
  * @param {Bounds} bounds
  * @param {Vector3} point1
  * @param {Vector3} point2
@@ -502,7 +502,7 @@ declare class BoundingBox {
   getCorners(bounds: Bounds, corners: Vector3[]): Vector3[];
 
   /**
-   * Computes the two corner poitns with min and max coords.
+   * Computes the two corner points with min and max coords.
    * @param {Bounds} bounds
    * @param {Vector3} point1
    * @param {Vector3} point2

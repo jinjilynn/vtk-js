@@ -1,6 +1,11 @@
-import { vtkAlgorithm, vtkObject } from '../../../interfaces';
 import { Nullable, Size, Vector2, Vector3 } from '../../../types';
 import { VtkDataTypes } from '../../../Common/Core/DataArray';
+import { vtkAlgorithm, vtkObject } from '../../../interfaces';
+import vtkBufferObject from '../../OpenGL/BufferObject';
+import vtkCellArray from '../../../Common/Core/CellArray';
+import vtkDataArray from '../../../Common/Core/DataArray';
+import vtkOpenGLTexture from '../../OpenGL/Texture';
+import vtkPoints from '../../../Common/Core/Points';
 import vtkRenderer from '../../Core/Renderer';
 import vtkTexture from '../../Core/Texture';
 import vtkViewStream from '../../../IO/Core/ImageStream/ViewStream';
@@ -24,10 +29,6 @@ export interface IOpenGLRenderWindowInitialValues {
 	webgl2?: boolean;
 	defaultToWebgl2?: boolean;
 	activeFramebuffer?: any;
-	xrSession?: any;
-	xrSessionIsAR?: boolean;
-	xrReferenceSpace?: any;
-	xrSupported?: boolean;
 	imageFormat?: 'image/png';
 	useOffScreen?: boolean;
 	useBackgroundImage?: boolean;
@@ -79,7 +80,7 @@ export interface vtkOpenGLRenderWindow extends vtkOpenGLRenderWindowBase {
 	 *
 	 * @param {HTMLElement} el The container element.
 	 */
-	setContainer(el: HTMLElement): void;
+	setContainer(el: Nullable<HTMLElement>): void;
 
 	/**
 	 * Get the container element.
@@ -232,36 +233,6 @@ export interface vtkOpenGLRenderWindow extends vtkOpenGLRenderWindowBase {
 	get3DContext(options: I3DContextOptions): Nullable<WebGLRenderingContext>;
 
 	/**
-	 * Request an XR session on the user device with WebXR,
-   * typically in response to a user request such as a button press.
-	 */
-	startXR(): void;
-
-  /**
-   * When an XR session is available, set up the XRWebGLLayer
-   * and request the first animation frame for the device
-   */
-   enterXR(): void,
-
-   /**
-    * Adjust world-to-physical parameters for different viewing modalities
-    *
-    * @param {Number} inputRescaleFactor
-    * @param {Number} inputTranslateZ
-    */
-   resetXRScene(inputRescaleFactor: number, inputTranslateZ: number): void,
-
-	/**
-	 * Request to stop the current XR session
-	 */
-	stopXR(): void;
-
-	/**
-	 *
-	 */
-	xrRender(): void;
-
-	/**
 	 *
 	 */
 	restoreContext(): void;
@@ -389,6 +360,37 @@ export interface vtkOpenGLRenderWindow extends vtkOpenGLRenderWindowBase {
 	 * @see getContainerSize()
 	 */
 	getComputedDevicePixelRatio(): number;
+
+	/**
+	 * Set graphics resources for vtk objects to be cached at the context level.
+	 * This provides mappers with a convenient API to re-use allocated GPU resources
+	 * without duplication.
+	 *
+	 * @param {Object} vtkObj VTK data object / array with resources on the GPU
+	 * @param {Object} gObj Container object that maintains a handle to the graphics resource on the GPU
+	 * @param {String} hash String hash that can be used by mappers to decide whether to discard or re-allocate
+	 * the cached resource.
+	 */
+	setGraphicsResourceForObject(vtkObj: vtkCellArray | vtkDataArray | vtkPoints, gObj: vtkOpenGLTexture | vtkBufferObject, hash: string): void;
+
+	/**
+	 * Get graphics resources for vtk objects cached at the context level.
+	 * This provides mappers with a convenient API to re-use allocated GPU resources
+	 * without duplication.
+	 *
+	 * @param {Object} vtkObj VTK data object / array with resources on the GPU
+	 * the cached resource.
+	 * @return {Object} Dictionary with the graphics resource and string hash
+	 */
+	getGraphicsResourceForObject(vtkObj: vtkCellArray | vtkDataArray | vtkPoints): {gObj: vtkOpenGLTexture | vtkBufferObject, hash: string};
+
+	/**
+	 * Get approximate graphics memory usage, in bytes, for the context. This is a simple computation
+	 * that analyzes how much memory is allocated on the GPU for textures, VBOs, etc. to give an
+	 * application a view of its graphics memory consumption.
+	 * Note that this ignores page resources.
+	 */
+	getGraphicsMemoryInfo(): number;
 }
 
 /**

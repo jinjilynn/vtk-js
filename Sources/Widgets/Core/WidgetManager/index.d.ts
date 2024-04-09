@@ -100,16 +100,6 @@ export interface vtkWidgetManager extends vtkObject {
   getPickingEnabled(): boolean;
 
   /**
-   * @deprecated
-   */
-  getUseSvgLayer(): boolean;
-
-  /**
-   * @deprecated
-   */
-  setUseSvgLayer(use: boolean): boolean;
-
-  /**
    * Enable the picking.
    */
   enablePicking(): void;
@@ -139,11 +129,11 @@ export interface vtkWidgetManager extends vtkObject {
    * @param {ViewTypes} [viewType]
    * @param {Object} [initialValues]
    */
-  addWidget(
-    widget: vtkAbstractWidgetFactory,
+  addWidget<WidgetFactory extends vtkAbstractWidgetFactory<any>>(
+    widget: WidgetFactory,
     viewType?: ViewTypes,
     initialValues?: object
-  ): Nullable<vtkAbstractWidget>;
+  ): WidgetFactory extends vtkAbstractWidgetFactory<infer WidgetInstance> ? WidgetInstance : never;
 
   /**
    * Unregister all widgets from the widget manager.
@@ -155,7 +145,7 @@ export interface vtkWidgetManager extends vtkObject {
    * 
    * @param {vtkAbstractWidget | vtkAbstractWidgetFactory} widget The widget to remove
    */
-  removeWidget(widget: vtkAbstractWidget | vtkAbstractWidgetFactory): void;
+  removeWidget(widget: vtkAbstractWidget | vtkAbstractWidgetFactory<any>): void;
 
   /**
    * Given x and y parameter, get selected data.
@@ -164,16 +154,6 @@ export interface vtkWidgetManager extends vtkObject {
    * @param {Number} y
    */
   getSelectedDataForXY(x: number, y: number): Promise<ISelectedData>;
-
-  /**
-   * @deprecated
-   */
-  updateSelectionFromXY(x: number, y: number): void;
-
-  /**
-   * @deprecated
-   */
-  updateSelectionFromMouseEvent(event: MouseEvent): void;
 
   /**
    * The all currently selected data.
@@ -185,22 +165,35 @@ export interface vtkWidgetManager extends vtkObject {
    * 
    * @param {vtkAbstractWidget | vtkAbstractWidgetFactory} widget The widget instance which should get the focus.
    */
-  grabFocus(widget: vtkAbstractWidget | vtkAbstractWidgetFactory): void;
+  grabFocus(widget: vtkAbstractWidget | vtkAbstractWidgetFactory<any>): void;
 
   /**
    * Release the focus.
    */
   releaseFocus(): void;
+
+  /**
+   * Sets the default cursor styles.
+   *
+   * Known style keys:
+   * - default: when not interacting with a widget
+   * - hover: when hovering over a widget.
+   *
+   * If a known style key is not present, the cursor style will not be changed.
+   * @param {Record<string, string>} cursorStyles
+   */
+  setCursorStyles(cursorStyles: Record<string, string>): boolean;
+
+  /**
+   * Retrieves the current cursor styles.
+   */
+  getCursorStyles(): Record<string, string>;
 }
 
 export interface IWidgetManagerInitialValues {
   captureOn?: CaptureOn;
   viewType?: ViewTypes;
   pickingEnabled?: boolean;
-  /**
-   * @deprecated
-   */
-  useSvgLayer?: boolean;
 }
 
 /**

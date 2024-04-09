@@ -258,7 +258,7 @@ export function getCorners(bounds, corners) {
   return corners;
 }
 
-// Computes the two corners with minimal and miximal coordinates
+// Computes the two corners with minimal and maximal coordinates
 export function computeCornerPoints(bounds, point1, point2) {
   point1[0] = bounds[0];
   point1[1] = bounds[2];
@@ -367,7 +367,7 @@ export function intersectBox(bounds, origin, dir, coord, tolerance) {
     }
   }
 
-  // Check for valie intersection along line
+  // Check for value intersection along line
   if (maxT[whichPlane] > 1.0 || maxT[whichPlane] < 0.0) {
     return 0;
   }

@@ -1,4 +1,4 @@
-import test from 'tape-catch';
+import test from 'tape';
 import testUtils from 'vtk.js/Sources/Testing/testUtils';
 
 import vtkActor from 'vtk.js/Sources/Rendering/Core/Actor';
@@ -39,7 +39,7 @@ test('Test vtkGenericRenderWindow create/delete', (t) => {
     grw.setContainer(rwContainer);
     grw.getRenderer().addActor(actor);
 
-    images.push(grw.getOpenGLRenderWindow().captureNextImage());
+    images.push(grw.getApiSpecificRenderWindow().captureNextImage());
     grw.getRenderWindow().render();
 
     grw.delete();

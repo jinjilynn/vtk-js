@@ -1,4 +1,4 @@
-import test from 'tape-catch';
+import test from 'tape';
 import macro from 'vtk.js/Sources/macros';
 
 const MY_ENUM = {
@@ -140,7 +140,7 @@ test('Macro methods array tests', (t) => {
     DEFAULT_VALUES.myProp1,
     'Initial gets should match defaults'
   );
-  // we must wrap the non-existent call inside another function to avoid test program exiting, and tape-catch generating error.
+  // we must wrap the non-existent call inside another function to avoid test program exiting, and tape generating error.
   t.throws(
     () => myTestClass.setMyProp1(1, 1, 1),
     /TypeError/,
@@ -650,11 +650,51 @@ test('Macro methods keystore tests', (t) => {
   t.end();
 });
 
+test('Macro methods normalizeWheel tests', (t) => {
+  const wheelEvent = { wheelDeltaX: 120 };
+
+  let normalizeWheelReturn = macro.normalizeWheel(wheelEvent);
+  t.equal(
+    normalizeWheelReturn.spinY,
+    -1,
+    'spinY should be set when only wheelDeltaX is defined'
+  );
+  t.equal(
+    normalizeWheelReturn.spinY,
+    normalizeWheelReturn.spinX,
+    'spinY should equal spinX when only wheelDeltaX is defined'
+  );
+  t.equal(
+    normalizeWheelReturn.pixelY,
+    -10,
+    'pixelY should be set when only wheelDeltaX is defined'
+  );
+  t.equal(
+    normalizeWheelReturn.pixelY,
+    normalizeWheelReturn.pixelX,
+    'pixelY should equal pixelX when only wheelDeltaX is defined'
+  );
+
+  wheelEvent.wheelDeltaY = 240;
+  normalizeWheelReturn = macro.normalizeWheel(wheelEvent);
+  t.equal(
+    normalizeWheelReturn.spinY,
+    -2,
+    'spinY should be set using wheelDeltaY when defined'
+  );
+  t.equal(
+    normalizeWheelReturn.pixelY,
+    -20,
+    'pixelY should be set using wheelDeltaY when defined'
+  );
+
+  t.end();
+});
+
 test('Macro debounce can be cancelled', (t) => {
   const func = () => {
     t.fail('Should not call cancelled debounce function');
   };
-
   const debFunc = macro.debounce(func, 5);
   debFunc();
   debFunc.cancel();

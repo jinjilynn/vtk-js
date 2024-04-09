@@ -81,6 +81,20 @@ export interface IRenderWindowInteractorEvent {
 	type: InteractorEventType;
 }
 
+export interface I3DEvent {
+	gamepad: Gamepad;
+	position: DOMPointReadOnly;
+	orientation: DOMPointReadOnly;
+	targetPosition: DOMPointReadOnly;
+	targetOrientation: DOMPointReadOnly;
+	device: Device;
+}
+
+export interface IButton3DEvent extends I3DEvent {
+	pressed: boolean;
+	input: Input;
+}
+
 export interface vtkRenderWindowInteractor extends vtkObject {
 
 	/**
@@ -93,7 +107,7 @@ export interface vtkRenderWindowInteractor extends vtkObject {
 	 *
 	 * @default null
 	 */
-	getContainer(): HTMLElement;
+	getContainer(): Nullable<HTMLElement>;
 
 	/**
 	 *
@@ -398,6 +412,11 @@ export interface vtkRenderWindowInteractor extends vtkObject {
 
 	/**
 	 *
+	 */
+	invokeRenderEvent(): void;
+
+	/**
+	 *
 	 * @param cb The callback to be called
 	 */
 	onStartAnimation(cb: InteractorEventCallback, priority?: number): Readonly<vtkSubscription>;
@@ -661,15 +680,23 @@ export interface vtkRenderWindowInteractor extends vtkObject {
 
 	/**
 	 *
-	 * @param args
+	 * @param {Function} cb The callback to be called.
+	 * @param {Number} [priority] The priority of the event.
 	 */
-	animationEvent(args: any): any;
+	onRenderEvent(cb: () => void, priority?: number): Readonly<vtkSubscription>;
 
 	/**
 	 *
 	 * @param args
 	 */
-	button3DEvent(args: any): any;
+	animationEvent(args: any): any;
+
+	/**
+	 * Triggers the 'Button3D' event.
+	 * 
+	 * @param args
+	 */
+	button3DEvent(eventPayload: IButton3DEvent): void;
 
 	/**
 	 *
@@ -792,10 +819,11 @@ export interface vtkRenderWindowInteractor extends vtkObject {
 	mouseWheelEvent(args: any): any;
 
 	/**
-	 *
-	 * @param args
+	 * Triggers the 'Move3D' event.
+	 * 
+	 * @param eventPayload
 	 */
-	move3DEvent(args: any): any;
+	move3DEvent(eventPayload: I3DEvent): void;
 
 	/**
 	 *
@@ -826,6 +854,13 @@ export interface vtkRenderWindowInteractor extends vtkObject {
 	 * @param args
 	 */
 	rotateEvent(args: any): any;
+
+	/**
+	 * Add an HTMLElement as the new container for the interactor.
+	 * All events will be bound to this new container.
+	 * Any old container will be removed along with its listeners.
+	 */
+	setContainer(container: Nullable<HTMLElement>): boolean;
 
 	/**
 	 * Turn on/off the automatic repositioning of lights as the camera moves.
@@ -992,12 +1027,15 @@ export interface vtkRenderWindowInteractor extends vtkObject {
 
 	/**
 	 *
-	 * @param container
+	 * @param container kept for backward compatibility.
+	 * @deprecated please use vtkRenderWindowInteractor.setContainer(container: HTMLElement)
+	 *     which will also bind events.
 	 */
 	bindEvents(container: any): void;
 
 	/**
 	 *
+	 * @deprecated please use vtkRenderWindowInteractor.setContainer(null) instead.
 	 */
 	unbindEvents(): void;
 

@@ -151,6 +151,7 @@ function vtkInteractorStyleManipulator(publicAPI, model) {
   // Set our className
   model.classHierarchy.push('vtkInteractorStyleManipulator');
 
+  model.currentVRManipulators = new Map();
   model.mouseManipulators = [];
   model.keyboardManipulators = [];
   model.vrManipulators = [];
@@ -289,24 +290,27 @@ function vtkInteractorStyleManipulator(publicAPI, model) {
     }
 
     // Look for a matching 3D camera interactor.
-    model.currentManipulator = publicAPI.findVRManipulator(
+    const manipulator = publicAPI.findVRManipulator(
       ed.device,
       ed.input,
       ed.pressed
     );
-    if (model.currentManipulator) {
-      model.currentManipulator.onButton3D(
-        publicAPI,
-        ed.pokedRenderer,
-        model.state,
-        ed.device,
-        ed.input,
-        ed.pressed
-      );
+
+    if (manipulator) {
+      // register the manipulator for this device
+      model.currentVRManipulators.set(ed.device, manipulator);
+
+      manipulator.onButton3D(publicAPI, ed.pokedRenderer, model.state, ed);
+
       if (ed.pressed) {
         publicAPI.startCameraPose();
       } else {
-        publicAPI.endCameraPose();
+        model.currentVRManipulators.delete(ed.device);
+
+        // make sure we don't end camera pose if other VR manipulators are currently interacting
+        if (model.currentVRManipulators.size === 0) {
+          publicAPI.endCameraPose();
+        }
       }
     } else {
       vtkDebugMacro('No manipulator found');
@@ -315,13 +319,10 @@ function vtkInteractorStyleManipulator(publicAPI, model) {
 
   //-------------------------------------------------------------------------
   publicAPI.handleMove3D = (ed) => {
-    if (model.currentManipulator && model.state === States.IS_CAMERA_POSE) {
-      model.currentManipulator.onMove3D(
-        publicAPI,
-        ed.pokedRenderer,
-        model.state,
-        ed
-      );
+    const manipulator = model.currentVRManipulators.get(ed.device);
+
+    if (manipulator && model.state === States.IS_CAMERA_POSE) {
+      manipulator.onMove3D(publicAPI, ed.pokedRenderer, model.state, ed);
     }
   };
 
@@ -707,7 +708,7 @@ function vtkInteractorStyleManipulator(publicAPI, model) {
 // Object factory
 // ----------------------------------------------------------------------------
 
-const DEFAULT_VALUES = {
+const defaultValues = (initialValues) => ({
   cachedMousePosition: null,
   currentManipulator: null,
   currentWheelManipulator: null,
@@ -717,12 +718,13 @@ const DEFAULT_VALUES = {
   // gestureManipulators: null,
   centerOfRotation: [0, 0, 0],
   rotationFactor: 1,
-};
+  ...initialValues,
+});
 
 // ----------------------------------------------------------------------------
 
 export function extend(publicAPI, model, initialValues = {}) {
-  Object.assign(model, DEFAULT_VALUES, initialValues);
+  Object.assign(model, defaultValues(initialValues));
 
   // Inheritance
   vtkInteractorStyle.extend(publicAPI, model, initialValues);

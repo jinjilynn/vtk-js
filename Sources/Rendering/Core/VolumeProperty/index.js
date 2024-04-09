@@ -65,7 +65,7 @@ function vtkVolumeProperty(publicAPI, model) {
   };
 
   // Set the color of a volume to a gray transfer function
-  publicAPI.setGrayTransferFunction = (index, func) => {
+  publicAPI.setGrayTransferFunction = (index = 0, func = null) => {
     let modified = false;
     if (model.componentData[index].grayTransferFunction !== func) {
       model.componentData[index].grayTransferFunction = func;
@@ -84,7 +84,7 @@ function vtkVolumeProperty(publicAPI, model) {
   };
 
   // Get the currently set gray transfer function. Create one if none set.
-  publicAPI.getGrayTransferFunction = (index) => {
+  publicAPI.getGrayTransferFunction = (index = 0) => {
     if (model.componentData[index].grayTransferFunction === null) {
       model.componentData[index].grayTransferFunction =
         vtkPiecewiseFunction.newInstance();
@@ -100,7 +100,7 @@ function vtkVolumeProperty(publicAPI, model) {
   };
 
   // Set the color of a volume to an RGB transfer function
-  publicAPI.setRGBTransferFunction = (index, func) => {
+  publicAPI.setRGBTransferFunction = (index = 0, func = null) => {
     let modified = false;
     if (model.componentData[index].rGBTransferFunction !== func) {
       model.componentData[index].rGBTransferFunction = func;
@@ -119,7 +119,7 @@ function vtkVolumeProperty(publicAPI, model) {
   };
 
   // Get the currently set RGB transfer function. Create one if none set.
-  publicAPI.getRGBTransferFunction = (index) => {
+  publicAPI.getRGBTransferFunction = (index = 0) => {
     if (model.componentData[index].rGBTransferFunction === null) {
       model.componentData[index].rGBTransferFunction =
         vtkColorTransferFunction.newInstance();
@@ -145,7 +145,7 @@ function vtkVolumeProperty(publicAPI, model) {
   };
 
   // Set the scalar opacity of a volume to a transfer function
-  publicAPI.setScalarOpacity = (index, func) => {
+  publicAPI.setScalarOpacity = (index = 0, func = null) => {
     if (model.componentData[index].scalarOpacity !== func) {
       model.componentData[index].scalarOpacity = func;
       publicAPI.modified();
@@ -155,7 +155,7 @@ function vtkVolumeProperty(publicAPI, model) {
   };
 
   // Get the scalar opacity transfer function. Create one if none set.
-  publicAPI.getScalarOpacity = (index) => {
+  publicAPI.getScalarOpacity = (index = 0) => {
     if (model.componentData[index].scalarOpacity === null) {
       model.componentData[index].scalarOpacity =
         vtkPiecewiseFunction.newInstance();
@@ -167,7 +167,7 @@ function vtkVolumeProperty(publicAPI, model) {
     return model.componentData[index].scalarOpacity;
   };
 
-  publicAPI.setComponentWeight = (index, value) => {
+  publicAPI.setComponentWeight = (index = 0, value = 1) => {
     if (index < 0 || index >= VTK_MAX_VRCOMP) {
       vtkErrorMacro('Invalid index');
       return false;
@@ -182,7 +182,7 @@ function vtkVolumeProperty(publicAPI, model) {
     return false;
   };
 
-  publicAPI.getComponentWeight = (index) => {
+  publicAPI.getComponentWeight = (index = 0) => {
     if (index < 0 || index >= VTK_MAX_VRCOMP) {
       vtkErrorMacro('Invalid index');
       return 0.0;
@@ -211,6 +211,7 @@ function vtkVolumeProperty(publicAPI, model) {
     'gradientOpacityMaximumValue',
     'gradientOpacityMaximumOpacity',
     'opacityMode',
+    'forceNearestInterpolation',
   ];
   sets.forEach((val) => {
     const cap = macro.capitalize(val);
@@ -232,6 +233,7 @@ function vtkVolumeProperty(publicAPI, model) {
     'gradientOpacityMaximumValue',
     'gradientOpacityMaximumOpacity',
     'opacityMode',
+    'forceNearestInterpolation',
   ];
   gets.forEach((val) => {
     const cap = macro.capitalize(val);
@@ -244,6 +246,7 @@ function vtkVolumeProperty(publicAPI, model) {
 // ----------------------------------------------------------------------------
 
 const DEFAULT_VALUES = {
+  colorMixPreset: null,
   independentComponents: true,
   interpolationType: InterpolationType.FAST_LINEAR,
   shade: false,
@@ -252,7 +255,7 @@ const DEFAULT_VALUES = {
   specular: 0.2,
   specularPower: 10.0,
   useLabelOutline: false,
-  labelOutlineThickness: 1,
+  labelOutlineThickness: [1],
   labelOutlineOpacity: 1.0,
 };
 
@@ -282,11 +285,13 @@ export function extend(publicAPI, model, initialValues = {}) {
         useGradientOpacity: false,
 
         componentWeight: 1.0,
+        forceNearestInterpolation: false,
       });
     }
   }
 
   macro.setGet(publicAPI, model, [
+    'colorMixPreset',
     'independentComponents',
     'interpolationType',
     'shade',
@@ -295,9 +300,10 @@ export function extend(publicAPI, model, initialValues = {}) {
     'specular',
     'specularPower',
     'useLabelOutline',
-    'labelOutlineThickness',
     'labelOutlineOpacity',
   ]);
+
+  macro.setGetArray(publicAPI, model, ['labelOutlineThickness']);
 
   // Object methods
   vtkVolumeProperty(publicAPI, model);

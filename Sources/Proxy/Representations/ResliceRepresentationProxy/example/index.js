@@ -13,7 +13,7 @@ import vtkProxyManager from '@kitware/vtk.js/Proxy/Core/ProxyManager';
 
 import vtkPlaneWidget from '@kitware/vtk.js/Widgets/Widgets3D/ImplicitPlaneWidget';
 import vtkWidgetManager from '@kitware/vtk.js/Widgets/Core/WidgetManager';
-import { SlabTypes } from 'vtk.js/Sources/Rendering/Core/ImageResliceMapper/Constants';
+import { SlabTypes } from '@kitware/vtk.js/Rendering/Core/ImageResliceMapper/Constants';
 
 import proxyConfiguration from './proxy';
 
@@ -73,7 +73,7 @@ const view2DProxy = proxyManager.createProxy('Views', 'View2D', {
 });
 view2DProxy.setContainer(mainContainer);
 view2DProxy
-  .getOpenGLRenderWindow()
+  .getApiSpecificRenderWindow()
   .setSize(mainContainer.clientWidth, mainContainer.clientHeight);
 
 fitCameraButton.addEventListener('click', () => {

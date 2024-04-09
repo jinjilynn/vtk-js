@@ -4,6 +4,7 @@ import vtkAbstractImageMapper from 'vtk.js/Sources/Rendering/Core/AbstractImageM
 import macro from 'vtk.js/Sources/macros';
 import vtkPoints from 'vtk.js/Sources/Common/Core/Points';
 import vtkPolyLine from 'vtk.js/Sources/Common/DataModel/PolyLine';
+import { ProjectionMode } from './Constants';
 
 const { vtkErrorMacro } = macro;
 
@@ -103,7 +104,10 @@ function vtkImageCPRMapper(publicAPI, model) {
       : orientationDataArray.getNumberOfComponents();
     switch (numComps) {
       case 16:
-        convert = mat4.getRotation;
+        convert = (outQuat, inMat) => {
+          mat4.getRotation(outQuat, inMat);
+          quat.normalize(outQuat, outQuat);
+        };
         break;
       case 9:
         convert = (outQuat, inMat) => {
@@ -303,6 +307,8 @@ function vtkImageCPRMapper(publicAPI, model) {
     });
   };
 
+  publicAPI.isProjectionEnabled = () => model.projectionSlabNumberOfSamples > 1;
+
   publicAPI.setCenterlineData = (centerlineData) =>
     publicAPI.setInputData(centerlineData, 1);
 
@@ -335,6 +341,9 @@ const DEFAULT_VALUES = {
   tangentDirection: [1, 0, 0],
   bitangentDirection: [0, 1, 0],
   normalDirection: [0, 0, 1],
+  projectionSlabThickness: 1,
+  projectionSlabNumberOfSamples: 1,
+  projectionMode: ProjectionMode.MAX,
 };
 
 // ----------------------------------------------------------------------------
@@ -362,6 +371,9 @@ export function extend(publicAPI, model, initialValues = {}) {
     'tangentDirection',
     'bitangentDirection',
     'normalDirection',
+    'projectionSlabThickness',
+    'projectionSlabNumberOfSamples',
+    'projectionMode',
   ]);
   CoincidentTopologyHelper.implementCoincidentTopologyMethods(publicAPI, model);
 

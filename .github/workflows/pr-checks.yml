@@ -14,7 +14,7 @@ jobs:
       - name: Setup node
         uses: actions/setup-node@v1
         with:
-          node-version: 16
+          node-version: 20
       - run: npm ci
       - name: Enforce code style
         run: npm run validate
@@ -23,3 +23,5 @@ jobs:
         run: npx commitlint --from=${{ github.event.pull_request.base.sha }}
       - name: Tests must not use test.only
         run: bash .github/workflows/test-only-check.sh
+      - name: API docs should generate without error
+        run: npm run doc:generate-api

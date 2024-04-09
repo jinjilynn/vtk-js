@@ -2,7 +2,9 @@ import vtkCell from '../../../Common/DataModel/Cell';
 import { Vector3 } from '../../../types';
 import vtkMapper from '../Mapper';
 import vtkPicker, { IPickerInitialValues } from '../Picker';
+import vtkProp3D from '../Prop3D';
 import vtkRenderer from '../Renderer';
+import { Nullable } from "../../../types";
 
 /**
  * 
@@ -13,6 +15,7 @@ export interface ICellPickerInitialValues extends IPickerInitialValues {
 	cellIJK?: number[];
 	pickNormal?: number[];
 	mapperNormal?: number[];
+	opacityThreshold?:number;
 }
 
 export interface vtkCellPicker extends vtkPicker {
@@ -41,6 +44,16 @@ export interface vtkCellPicker extends vtkPicker {
 	 * 
 	 */
 	getMapperNormalByReference(): number[];
+
+	/**
+	 * Get the opacity threshold for volume picking
+	 */
+	getOpacityThreshold(): number;
+
+	/**
+	 * Get the opacity threshold for volume picking
+	 */
+	setOpacityThreshold(value: number);
 
 	/**
 	 * Get the parametric coordinates of the picked cell.
@@ -72,26 +85,6 @@ export interface vtkCellPicker extends vtkPicker {
 	 * @param {vtkRenderer} renderer The vtkRenderer instance.
 	 */
 	pick(selection: any, renderer: vtkRenderer): void;
-
-	/**
-	 * 
-	 * @param {Vector3} p1 
-	 * @param {Vector3} p2 
-	 * @param {Number} tol 
-	 * @param {vtkMapper} mapper The vtkMapper instance.
-	 */
-	intersectWithLine(p1: Vector3, p2: Vector3, tol: number, mapper: vtkMapper): number;
-
-	/**
-	 * 
-	 * @param {Vector3} p1 
-	 * @param {Vector3} p2 
-	 * @param {Number} t1 
-	 * @param {Number} t2 
-	 * @param {Number} tol 
-	 * @param {vtkMapper} mapper The vtkMapper instance.
-	 */
-	intersectActorWithLine(p1: Vector3, p2: Vector3, t1: number, t2: number, tol: number, mapper: vtkMapper): number;
 }
 
 /**

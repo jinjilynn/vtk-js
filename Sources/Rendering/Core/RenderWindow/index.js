@@ -95,21 +95,33 @@ function vtkRenderWindow(publicAPI, model) {
   };
 
   publicAPI.getStatistics = () => {
-    const results = { propCount: 0, invisiblePropCount: 0 };
+    const results = { propCount: 0, invisiblePropCount: 0, gpuMemoryMB: 0 };
+    model._views.forEach((v) => {
+      if (v.getGraphicsMemoryInfo)
+        results.gpuMemoryMB += v.getGraphicsMemoryInfo() / 1e6;
+    });
     model.renderers.forEach((ren) => {
       const props = ren.getViewProps();
+      const gren = model._views[0].getViewNodeFor(ren);
       props.forEach((prop) => {
         if (prop.getVisibility()) {
           results.propCount += 1;
           const mpr = prop.getMapper && prop.getMapper();
           if (mpr && mpr.getPrimitiveCount) {
-            const pcount = mpr.getPrimitiveCount();
-            Object.keys(pcount).forEach((keyName) => {
-              if (!results[keyName]) {
-                results[keyName] = 0;
+            const gmpr = gren.getViewNodeFor(mpr);
+            if (gmpr) {
+              if (gmpr.getAllocatedGPUMemoryInBytes) {
+                results.gpuMemoryMB +=
+                  gmpr.getAllocatedGPUMemoryInBytes() / 1e6;
               }
-              results[keyName] += pcount[keyName];
-            });
+              const pcount = mpr.getPrimitiveCount();
+              Object.keys(pcount).forEach((keyName) => {
+                if (!results[keyName]) {
+                  results[keyName] = 0;
+                }
+                results[keyName] += pcount[keyName];
+              });
+            }
           }
         } else {
           results.invisiblePropCount += 1;

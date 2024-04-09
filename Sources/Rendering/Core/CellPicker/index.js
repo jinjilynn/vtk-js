@@ -7,7 +7,9 @@ import vtkTriangle from 'vtk.js/Sources/Common/DataModel/Triangle';
 import vtkQuad from 'vtk.js/Sources/Common/DataModel/Quad';
 import * as vtkMath from 'vtk.js/Sources/Common/Core/Math';
 import { CellType } from 'vtk.js/Sources/Common/DataModel/CellTypes/Constants';
-import { vec3 } from 'gl-matrix';
+import { vec3, vec4 } from 'gl-matrix';
+import vtkMatrixBuilder from 'vtk.js/Sources/Common/Core/MatrixBuilder';
+import vtkBox from 'vtk.js/Sources/Common/DataModel/Box';
 
 // ----------------------------------------------------------------------------
 // Global methods
@@ -170,10 +172,10 @@ function vtkCellPicker(publicAPI, model) {
     return pickResult;
   };
 
-  publicAPI.intersectWithLine = (p1, p2, tol, mapper) => {
+  model.intersectWithLine = (p1, p2, tolerance, prop, mapper) => {
     let tMin = Number.MAX_VALUE;
-    const t1 = 0.0;
-    const t2 = 1.0;
+    let t1 = 0.0;
+    let t2 = 1.0;
 
     const vtkCellPickerPlaneTol = 1e-14;
 
@@ -196,8 +198,28 @@ function vtkCellPicker(publicAPI, model) {
         model.cellIJK = pickData.ijk;
         model.pCoords = pickData.pCoords;
       }
+    } else if (mapper.isA('vtkVolumeMapper')) {
+      // we calculate here the parametric intercept points between the ray and the bounding box, so
+      // if the application defines for some reason a too large ray length (1e6), it restrict the calculation
+      // to the vtkVolume prop bounding box
+      const interceptionObject = vtkBox.intersectWithLine(
+        mapper.getBounds(),
+        p1,
+        p2
+      );
+
+      t1 =
+        interceptionObject?.t1 > clipLine.t1
+          ? interceptionObject.t1
+          : clipLine.t1;
+      t2 =
+        interceptionObject?.t2 < clipLine.t2
+          ? interceptionObject.t2
+          : clipLine.t2;
+
+      tMin = model.intersectVolumeWithLine(p1, p2, t1, t2, tolerance, prop);
     } else if (mapper.isA('vtkMapper')) {
-      tMin = publicAPI.intersectActorWithLine(p1, p2, t1, t2, tol, mapper);
+      tMin = model.intersectActorWithLine(p1, p2, t1, t2, tolerance, mapper);
     }
 
     if (tMin < model.globalTMin) {
@@ -244,7 +266,129 @@ function vtkCellPicker(publicAPI, model) {
     return tMin;
   };
 
-  publicAPI.intersectActorWithLine = (p1, p2, t1, t2, tol, mapper) => {
+  model.intersectVolumeWithLine = (p1, p2, t1, t2, tolerance, volume) => {
+    let tMin = Number.MAX_VALUE;
+    const mapper = volume.getMapper();
+    const imageData = mapper.getInputData();
+    const origin = imageData.getOrigin();
+    const spacing = imageData.getSpacing();
+    const dims = imageData.getDimensions();
+    const scalars = imageData.getPointData().getScalars().getData();
+    const extent = imageData.getExtent();
+    const direction = imageData.getDirection();
+    let imageTransform;
+    if (!vtkMath.isIdentity3x3(direction)) {
+      imageTransform = vtkMatrixBuilder
+        .buildFromRadian()
+        .translate(origin[0], origin[1], origin[2])
+        .multiply3x3(direction)
+        .translate(-origin[0], -origin[1], -origin[2])
+        .invert()
+        .getMatrix();
+    }
+
+    // calculate opacity table
+    const numIComps = 1;
+    const oWidth = 1024;
+    const tmpTable = new Float32Array(oWidth);
+    const opacityArray = new Float32Array(oWidth);
+    let ofun;
+    let oRange;
+    const sampleDist = volume.getMapper().getSampleDistance();
+
+    for (let c = 0; c < numIComps; ++c) {
+      ofun = volume.getProperty().getScalarOpacity(c);
+      oRange = ofun.getRange();
+      ofun.getTable(oRange[0], oRange[1], oWidth, tmpTable, 1);
+      const opacityFactor =
+        sampleDist / volume.getProperty().getScalarOpacityUnitDistance(c);
+
+      // adjust for sample distance etc
+      for (let i = 0; i < oWidth; ++i) {
+        opacityArray[i] = 1.0 - (1.0 - tmpTable[i]) ** opacityFactor;
+      }
+    }
+    const scale = oWidth / (oRange[1] - oRange[0] + 1);
+
+    // Make a new p1 and p2 using the clipped t1 and t2
+    const q1 = [0, 0, 0];
+    const q2 = [0, 0, 0];
+    q1[0] = p1[0];
+    q1[1] = p1[1];
+    q1[2] = p1[2];
+    q2[0] = p2[0];
+    q2[1] = p2[1];
+    q2[2] = p2[2];
+    if (t1 !== 0.0 || t2 !== 1.0) {
+      for (let j = 0; j < 3; j++) {
+        q1[j] = p1[j] * (1.0 - t1) + p2[j] * t1;
+        q2[j] = p1[j] * (1.0 - t2) + p2[j] * t2;
+      }
+    }
+
+    const x1 = [0, 0, 0];
+    const x2 = [0, 0, 0];
+    for (let i = 0; i < 3; i++) {
+      x1[i] = (q1[i] - origin[i]) / spacing[i];
+      x2[i] = (q2[i] - origin[i]) / spacing[i];
+    }
+    const x = [0, 0, 0, 0];
+    const xi = [0, 0, 0];
+
+    const sliceSize = dims[1] * dims[0];
+    const rowSize = dims[0];
+    // here the step is the 1 over the distance between volume index location x1 and x2
+    const step = 1 / Math.sqrt(vtkMath.distance2BetweenPoints(x1, x2));
+    let insideVolume;
+    // here we reinterpret the t value as the distance between x1 and x2
+    // When calculating the tMin, we weight t between t1 and t2 values
+    for (let t = 0; t < 1; t += step) {
+      // calculate the location of the point
+      insideVolume = true;
+      for (let j = 0; j < 3; j++) {
+        // "t" is the fractional distance between endpoints x1 and x2
+        x[j] = x1[j] * (1.0 - t) + x2[j] * t;
+      }
+      x[3] = 1.0;
+      if (imageTransform) {
+        vec4.transformMat4(x, x, imageTransform);
+      }
+
+      for (let j = 0; j < 3; j++) {
+        // Bounds check
+        if (x[j] < extent[2 * j]) {
+          x[j] = extent[2 * j];
+          insideVolume = false;
+        } else if (x[j] > extent[2 * j + 1]) {
+          x[j] = extent[2 * j + 1];
+          insideVolume = false;
+        }
+
+        xi[j] = Math.round(x[j]);
+      }
+
+      if (insideVolume) {
+        const index = xi[2] * sliceSize + xi[1] * rowSize + xi[0];
+        let value = scalars[index];
+        if (value < oRange[0]) {
+          value = oRange[0];
+        } else if (value > oRange[1]) {
+          value = oRange[1];
+        }
+        value = Math.floor((value - oRange[0]) * scale);
+        const opacity = tmpTable[value];
+        if (opacity > model.opacityThreshold) {
+          // returning the tMin to the original scale, if t1 > 0 or t2 < 1
+          tMin = t1 * (1.0 - t) + t2 * t;
+          break;
+        }
+      }
+    }
+
+    return tMin;
+  };
+
+  model.intersectActorWithLine = (p1, p2, t1, t2, tolerance, mapper) => {
     let tMin = Number.MAX_VALUE;
     const minXYZ = [0, 0, 0];
     let pDistMin = Number.MAX_VALUE;
@@ -316,15 +460,15 @@ function vtkCellPicker(publicAPI, model) {
               t2,
               p1,
               p2,
-              tol,
+              tolerance,
               x,
               pCoords
             );
           } else {
-            cellPicked = cell.intersectWithLine(p1, p2, tol, x, pCoords);
+            cellPicked = cell.intersectWithLine(p1, p2, tolerance, x, pCoords);
           }
         } else {
-          cellPicked = cell.intersectWithLine(q1, q2, tol, x, pCoords);
+          cellPicked = cell.intersectWithLine(q1, q2, tolerance, x, pCoords);
           if (t1 !== 0.0 || t2 !== 1.0) {
             cellPicked.t = t1 * (1.0 - cellPicked.t) + t2 * cellPicked.t;
           }
@@ -427,6 +571,7 @@ const DEFAULT_VALUES = {
   cellIJK: [],
   pickNormal: [],
   mapperNormal: [],
+  opacityThreshold: 0.2,
 };
 
 // ----------------------------------------------------------------------------
@@ -443,6 +588,9 @@ export function extend(publicAPI, model, initialValues = {}) {
     'pCoords',
     'cellIJK',
   ]);
+
+  macro.setGet(publicAPI, model, ['opacityThreshold']);
+
   macro.get(publicAPI, model, ['cellId']);
 
   // Object methods

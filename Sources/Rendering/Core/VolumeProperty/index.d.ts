@@ -1,7 +1,8 @@
 import vtkPiecewiseFunction from "../../../Common/DataModel/PiecewiseFunction";
 import { vtkObject } from "../../../interfaces";
+import { Nullable } from "../../../types";
 import vtkColorTransferFunction from "../ColorTransferFunction";
-import { InterpolationType, OpacityMode } from "./Constants";
+import { ColorMixPreset, InterpolationType, OpacityMode } from "./Constants";
 
 export interface IVolumePropertyInitialValues  {
 	independentComponents?: boolean;
@@ -11,7 +12,7 @@ export interface IVolumePropertyInitialValues  {
 	specular?: number;
 	specularPower?: number;
 	useLabelOutline?: boolean;
-	labelOutlineThickness?: number;
+	labelOutlineThickness?: number | number[];
 }
 
 export interface vtkVolumeProperty extends vtkObject {
@@ -69,6 +70,11 @@ export interface vtkVolumeProperty extends vtkObject {
 	getGradientOpacityMinimumValue(index: number): number;
 
 	/**
+	 * 
+	 */
+	getColorMixPreset(): Nullable<ColorMixPreset>;
+
+	/**
 	 *
 	 */
 	getIndependentComponents(): boolean;
@@ -92,7 +98,7 @@ export interface vtkVolumeProperty extends vtkObject {
 	getOpacityMode(index: number): OpacityMode;
 
 	/**
-	 *
+	 * gets the label outline thickness 
 	 */
 	getLabelOutlineThickness(): number;
 
@@ -128,6 +134,12 @@ export interface vtkVolumeProperty extends vtkObject {
 	 * @param {Number} index 
 	 */
 	getUseGradientOpacity(index: number): boolean;
+
+	/**
+	 * @see setForceNearestInterpolation
+	 * @param {Number} index
+	 */
+	getForceNearestInterpolation(index: number): boolean;
 
 	/**
 	 *
@@ -182,6 +194,20 @@ export interface vtkVolumeProperty extends vtkObject {
 	setGrayTransferFunction(index: number, func: vtkPiecewiseFunction): boolean;
 
 	/**
+	 * Set the color mix code to a preset value
+	 * Set to null to use no preset
+	 * See the test `testColorMix` for an example on how to use this preset.
+	 *
+	 * If set to `CUSTOM`, a tag `//VTK::CustomColorMix` is made available to the
+	 * user who can user shader replacements to put its own code. The given code
+	 * will be used to mix the colors from each component.
+	 * Each component is available as a rgba vec4: `comp0`, `comp1`...
+	 * There are other useful functions or variable available. To find them,
+	 * see `//VTK::CustomComponentsColorMix::Impl` tag in `vtkVolumeFS.glsl`.
+	 */
+	setColorMixPreset(preset: Nullable<ColorMixPreset>): boolean;
+
+	/**
 	 * Does the data have independent components, or do some define color only?
 	 * If IndependentComponents is On (the default) then each component will be
 	 * independently passed through a lookup table to determine RGBA, shaded.
@@ -205,10 +231,19 @@ export interface vtkVolumeProperty extends vtkObject {
 	setIndependentComponents(independentComponents: boolean): boolean;
 
 	/**
-	 *
-	 * @param {Number} labelOutlineThickness 
+	 * It will set the label outline thickness for the labelmaps. It can accept
+	 * a single number or an array of numbers. If a single number is provided,
+	 * it will be used for all the segments. If an array is provided, it indicates
+	 * the thickness for each segment index. For instance if you have a labelmap
+	 * with 3 segments (0: background 1: liver 2: tumor), you can set the thickness
+	 * to [2,4] to have a thicker outline for the tumor (thickness 4). It should be 
+	 * noted that the thickness is in pixel and also the first array value will 
+	 * control the default thickness for all labels when 0 or not specified.
+	 * 
+	 * @param {Number | Number[]} labelOutlineThickness
 	 */
-	setLabelOutlineThickness(labelOutlineThickness: number): boolean;
+	setLabelOutlineThickness(labelOutlineThickness: number | number[]): boolean;
+
 
 	/**
 	 *
@@ -270,14 +305,14 @@ export interface vtkVolumeProperty extends vtkObject {
 	 * @param {Number} index 
 	 * @param {vtkColorTransferFunction} func 
 	 */
-	setRGBTransferFunction(index: number, func: vtkColorTransferFunction): boolean;
+	setRGBTransferFunction(index: number, func?: Nullable<vtkColorTransferFunction>): boolean;
 
 	/**
 	 * Set the scalar opacity of a volume to a transfer function
 	 * @param {Number} index 
 	 * @param {vtkPiecewiseFunction} func 
 	 */
-	setScalarOpacity(index: number, func: vtkPiecewiseFunction): boolean;
+	setScalarOpacity(index: number, func?: Nullable<vtkPiecewiseFunction>): boolean;
 
 	/**
 	 * Set the scalar component weights.
@@ -285,6 +320,15 @@ export interface vtkVolumeProperty extends vtkObject {
 	 * @param {Number} value 
 	 */
 	setComponentWeight(index: number, value: number): boolean;
+
+	/**
+	 * Force the nearest neighbor interpolation of one or more of the components
+	 * The interpolation for the rest of the volume is set using `setInterpolationType`
+	 * @see setInterpolationType
+	 * @param {Number} index
+	 * @param {Boolean} value
+	 */
+	setForceNearestInterpolation(index: number, value: boolean): boolean;
 
 	/**
 	 * Get the scalar component weights.
