@@ -1,6 +1,6 @@
 import { Nullable, Size, Vector2, Vector3 } from '../../../types';
+import { vtkAlgorithm } from '../../../interfaces';
 import { VtkDataTypes } from '../../../Common/Core/DataArray';
-import { vtkAlgorithm, vtkObject } from '../../../interfaces';
 import vtkBufferObject from '../../OpenGL/BufferObject';
 import vtkCellArray from '../../../Common/Core/CellArray';
 import vtkDataArray from '../../../Common/Core/DataArray';
@@ -8,389 +8,466 @@ import vtkOpenGLTexture from '../../OpenGL/Texture';
 import vtkPoints from '../../../Common/Core/Points';
 import vtkRenderer from '../../Core/Renderer';
 import vtkTexture from '../../Core/Texture';
+import vtkViewNode from '../../SceneGraph/ViewNode';
 import vtkViewStream from '../../../IO/Core/ImageStream/ViewStream';
 
 /**
  *
  */
 export interface IOpenGLRenderWindowInitialValues {
-	cullFaceEnabled?: boolean;
-	shaderCache?: null;
-	initialized?: boolean;
-	context?: WebGLRenderingContext | WebGL2RenderingContext;
-	canvas?: HTMLCanvasElement;
-	cursorVisibility?: boolean;
-	cursor?: string;
-	textureUnitManager?: null;
-	textureResourceIds?: null;
-	containerSize?: Size;
-	renderPasses?: any[];
-	notifyStartCaptureImage?: boolean;
-	webgl2?: boolean;
-	defaultToWebgl2?: boolean;
-	activeFramebuffer?: any;
-	imageFormat?: 'image/png';
-	useOffScreen?: boolean;
-	useBackgroundImage?: boolean;
+  cullFaceEnabled?: boolean;
+  shaderCache?: null;
+  initialized?: boolean;
+  context?: WebGLRenderingContext | WebGL2RenderingContext;
+  context2D?: CanvasRenderingContext2D;
+  canvas?: HTMLCanvasElement;
+  cursorVisibility?: boolean;
+  cursor?: string;
+  textureUnitManager?: null;
+  textureResourceIds?: null;
+  containerSize?: Size;
+  renderPasses?: any[];
+  notifyStartCaptureImage?: boolean;
+  webgl2?: boolean;
+  defaultToWebgl2?: boolean;
+  activeFramebuffer?: any;
+  imageFormat?: 'image/png';
+  useOffScreen?: boolean;
+  useBackgroundImage?: boolean;
 }
 
 export interface ICaptureOptions {
-	resetCamera?: boolean;
-	size?: Size;
-	scale?: number
+  resetCamera?: boolean;
+  size?: Size;
+  scale?: number;
 }
 
-export interface I3DContextOptions {
-    preserveDrawingBuffer?: boolean;
-    depth?: boolean;
-    alpha?: boolean;
-    powerPreference?: string;
-}
+export interface vtkOpenGLRenderWindow extends vtkViewNode {
+  /**
+   * Builds myself.
+   * @param {Boolean} prepass
+   */
+  buildPass(prepass: boolean): void;
 
-type vtkOpenGLRenderWindowBase = vtkObject & Omit<vtkAlgorithm,
-	| 'getInputData'
-	| 'setInputData'
-	| 'setInputConnection'
-	| 'getInputConnection'
-	| 'addInputConnection'
-	| 'addInputData'>;
+  /**
+   * Initialize the rendering window. This will setup all system-specific
+   * resources. This method and Finalize() must be symmetric and it should be
+   * possible to call them multiple times, even changing WindowId in-between.
+   * This is what WindowRemap does.
+   */
+  initialize(): void;
 
-export interface vtkOpenGLRenderWindow extends vtkOpenGLRenderWindowBase {
+  /**
+   *
+   */
+  makeCurrent(): void;
 
-	/**
-	 * Builds myself.
-	 * @param {Boolean} prepass
-	 */
-	buildPass(prepass: boolean): void;
+  /**
+   *
+   * @param {HTMLElement} el The container element.
+   */
+  setContainer(el: Nullable<HTMLElement>): void;
 
-	/**
-     * Initialize the rendering window. This will setup all system-specific
-	 * resources. This method and Finalize() must be symmetric and it should be
-	 * possible to call them multiple times, even changing WindowId in-between.
-	 * This is what WindowRemap does.
-	 */
-	initialize(): void;
+  /**
+   * Get the container element.
+   */
+  getContainer(): Nullable<HTMLElement>;
 
-	/**
-	 *
-	 */
-	makeCurrent(): void;
+  /**
+   * Get the container size.
+   */
+  getContainerSize(): Vector2;
 
-	/**
-	 *
-	 * @param {HTMLElement} el The container element.
-	 */
-	setContainer(el: Nullable<HTMLElement>): void;
+  /**
+   * Get the frame buffer size.
+   */
+  getFramebufferSize(): Vector2;
 
-	/**
-	 * Get the container element.
-	 */
-	getContainer(): Nullable<HTMLElement>;
+  /**
+   * Get the webgl canvas.
+   */
+  getCanvas(): Nullable<HTMLCanvasElement>;
 
-	/**
-	 * Get the container size.
-	 */
-	getContainerSize(): Vector2;
+  /**
+   * Set the webgl canvas.
+   */
+  setCanvas(canvas: Nullable<HTMLCanvasElement>): boolean;
 
-	/**
-	 * Get the frame buffer size.
-	 */
-	getFramebufferSize(): Vector2;
+  /**
+   * Check if a point is in the viewport.
+   * @param {Number} x The x coordinate.
+   * @param {Number} y The y coordinate.
+   * @param {vtkRenderer} viewport The viewport vtk element.
+   */
+  isInViewport(x: number, y: number, viewport: vtkRenderer): boolean;
 
-	/**
-	 * Get the webgl canvas.
-	 */
-	getCanvas(): Nullable<HTMLCanvasElement>;
+  /**
+   * Get the viewport size.
+   * @param {vtkRenderer} viewport The viewport vtk element.
+   */
+  getViewportSize(viewport: vtkRenderer): Vector2;
 
-	/**
-	 * Check if a point is in the viewport.
-	 * @param {Number} x The x coordinate.
-	 * @param {Number} y The y coordinate.
-	 * @param {vtkRenderer} viewport The viewport vtk element.
-	 */
-	isInViewport(x: number, y: number, viewport: vtkRenderer): boolean;
+  /**
+   * Get the center of the viewport.
+   * @param {vtkRenderer} viewport The viewport vtk element.
+   */
+  getViewportCenter(viewport: vtkRenderer): Vector2;
 
-	/**
-	 * Get the viewport size.
-	 * @param {vtkRenderer} viewport The viewport vtk element.
-	 */
-	getViewportSize(viewport: vtkRenderer): Vector2;
+  /**
+   *
+   * @param {Number} x
+   * @param {Number} y
+   * @param {Number} z
+   */
+  displayToNormalizedDisplay(x: number, y: number, z: number): Vector3;
 
-	/**
-	 * Get the center of the viewport.
-	 * @param {vtkRenderer} viewport The viewport vtk element.
-	 */
-	getViewportCenter(viewport: vtkRenderer): Vector2;
+  /**
+   *
+   * @param {Number} x
+   * @param {Number} y
+   * @param {Number} z
+   */
+  normalizedDisplayToDisplay(x: number, y: number, z: number): Vector3;
 
-	/**
-	 *
-	 * @param {Number} x
-	 * @param {Number} y
-	 * @param {Number} z
-	 */
-	displayToNormalizedDisplay(x: number, y: number, z: number): Vector3;
+  /**
+   *
+   * @param {Number} x
+   * @param {Number} y
+   * @param {Number} z
+   * @param {vtkRenderer} renderer The vtkRenderer instance.
+   */
+  worldToView(x: number, y: number, z: number, renderer: vtkRenderer): Vector3;
 
-	/**
-	 *
-	 * @param {Number} x
-	 * @param {Number} y
-	 * @param {Number} z
-	 */
-	normalizedDisplayToDisplay(x: number, y: number, z: number): Vector3;
+  /**
+   *
+   * @param {Number} x
+   * @param {Number} y
+   * @param {Number} z
+   * @param {vtkRenderer} renderer The vtkRenderer instance.
+   */
+  viewToWorld(x: number, y: number, z: number, renderer: vtkRenderer): Vector3;
 
-	/**
-	 *
-	 * @param {Number} x
-	 * @param {Number} y
-	 * @param {Number} z
-	 * @param {vtkRenderer} renderer The vtkRenderer instance.
-	 */
-	worldToView(x: number, y: number, z: number, renderer: vtkRenderer): Vector3;
+  /**
+   *
+   * @param {Number} x
+   * @param {Number} y
+   * @param {Number} z
+   * @param {vtkRenderer} renderer The vtkRenderer instance.
+   */
+  worldToDisplay(
+    x: number,
+    y: number,
+    z: number,
+    renderer: vtkRenderer
+  ): Vector3;
 
-	/**
-	 *
-	 * @param {Number} x
-	 * @param {Number} y
-	 * @param {Number} z
-	 * @param {vtkRenderer} renderer The vtkRenderer instance.
-	 */
-	viewToWorld(x: number, y: number, z: number, renderer: vtkRenderer): Vector3;
+  /**
+   *
+   * @param {Number} x
+   * @param {Number} y
+   * @param {Number} z
+   * @param {vtkRenderer} renderer The vtkRenderer instance.
+   */
+  displayToWorld(
+    x: number,
+    y: number,
+    z: number,
+    renderer: vtkRenderer
+  ): Vector3;
 
-	/**
-	 *
-	 * @param {Number} x
-	 * @param {Number} y
-	 * @param {Number} z
-	 * @param {vtkRenderer} renderer The vtkRenderer instance.
-	 */
-	worldToDisplay(x: number, y: number, z: number, renderer: vtkRenderer): Vector3;
+  /**
+   *
+   * @param {Number} x
+   * @param {Number} y
+   * @param {Number} z
+   * @param {vtkRenderer} renderer The vtkRenderer instance.
+   */
+  normalizedDisplayToViewport(
+    x: number,
+    y: number,
+    z: number,
+    renderer: vtkRenderer
+  ): Vector3;
 
-	/**
-	 *
-	 * @param {Number} x
-	 * @param {Number} y
-	 * @param {Number} z
-	 * @param {vtkRenderer} renderer The vtkRenderer instance.
-	 */
-	displayToWorld(x: number, y: number, z: number, renderer: vtkRenderer): Vector3;
+  /**
+   *
+   * @param {Number} x
+   * @param {Number} y
+   * @param {Number} z
+   * @param {vtkRenderer} renderer The vtkRenderer instance.
+   */
+  viewportToNormalizedViewport(
+    x: number,
+    y: number,
+    z: number,
+    renderer: vtkRenderer
+  ): Vector3;
 
-	/**
-	 *
-	 * @param {Number} x
-	 * @param {Number} y
-	 * @param {Number} z
-	 * @param {vtkRenderer} renderer The vtkRenderer instance.
-	 */
-	normalizedDisplayToViewport(x: number, y: number, z: number, renderer: vtkRenderer): Vector3;
+  /**
+   *
+   * @param {Number} x
+   * @param {Number} y
+   * @param {Number} z
+   */
+  normalizedViewportToViewport(x: number, y: number, z: number): Vector3;
 
-	/**
-	 *
-	 * @param {Number} x
-	 * @param {Number} y
-	 * @param {Number} z
-	 * @param {vtkRenderer} renderer The vtkRenderer instance.
-	 */
-	viewportToNormalizedViewport(x: number, y: number, z: number, renderer: vtkRenderer): Vector3;
+  /**
+   *
+   * @param {Number} x
+   * @param {Number} y
+   * @param {Number} z
+   */
+  displayToLocalDisplay(x: number, y: number, z: number): Vector3;
 
-	/**
-	 *
-	 * @param {Number} x
-	 * @param {Number} y
-	 * @param {Number} z
-	 */
-	normalizedViewportToViewport(x: number, y: number, z: number): Vector3;
+  /**
+   *
+   * @param {Number} x
+   * @param {Number} y
+   * @param {Number} z
+   * @param {vtkRenderer} renderer The vtkRenderer instance.
+   */
+  viewportToNormalizedDisplay(
+    x: number,
+    y: number,
+    z: number,
+    renderer: vtkRenderer
+  ): Vector3;
 
-	/**
-	 *
-	 * @param {Number} x
-	 * @param {Number} y
-	 * @param {Number} z
-	 */
-	displayToLocalDisplay(x: number, y: number, z: number): Vector3;
+  /**
+   *
+   * @param {Number} x1
+   * @param {Number} y1
+   * @param {Number} x2
+   * @param {Number} y2
+   */
+  getPixelData(x1: number, y1: number, x2: number, y2: number): Uint8Array;
 
-	/**
-	 *
-	 * @param {Number} x
-	 * @param {Number} y
-	 * @param {Number} z
-	 * @param {vtkRenderer} renderer The vtkRenderer instance.
-	 */
-	viewportToNormalizedDisplay(x: number, y: number, z: number, renderer: vtkRenderer): Vector3;
+  /**
+   *
+   * @param {WebGLContextAttributes} options
+   */
+  get3DContext(
+    options: WebGLContextAttributes
+  ): Nullable<WebGLRenderingContext>;
 
-	/**
-	 *
-	 * @param {Number} x1
-	 * @param {Number} y1
-	 * @param {Number} x2
-	 * @param {Number} y2
-	 */
-	getPixelData(x1: number, y1: number, x2: number, y2: number): Uint8Array;
+  /**
+   *
+   * @param {CanvasRenderingContext2DSettings} options
+   */
+  get2DContext(
+    options: CanvasRenderingContext2DSettings
+  ): Nullable<CanvasRenderingContext2D>;
 
-	/**
-	 *
-	 * @param {I3DContextOptions} options
-	 */
-	get3DContext(options: I3DContextOptions): Nullable<WebGLRenderingContext>;
+  /**
+   * Copy the content of the root parent, if there is one, to the canvas
+   */
+  copyParentContent(): void;
 
-	/**
-	 *
-	 */
-	restoreContext(): void;
+  /**
+   * Resize this render window using the size of its children
+   * The new size of the renderwindow is the size of the bounding box
+   * containing all the child render windows
+   */
+  resizeFromChildRenderWindows(): void;
 
-	/**
-	 *
-	 * @param {vtkTexture} texture
-	 */
-	activateTexture(texture: vtkTexture): void;
+  /**
+   * Returns the last ancestor of type vtkOpenGLRenderWindow if there is one
+   * If there is no parent vtkOpenGLRenderWindow, returns undefined
+   */
+  getRootOpenGLRenderWindow(): vtkOpenGLRenderWindow | undefined;
 
-	/**
-	 *
-	 * @param {vtkTexture} texture
-	 */
-	deactivateTexture(texture: vtkTexture): void;
+  /**
+   * The context 2D is created during initialization instead of the WebGL context
+   * when there is a parent render window
+   */
+  getContext2D(): CanvasRenderingContext2D | undefined;
 
-	/**
-	 *
-	 * @param {vtkTexture} texture
-	 */
-	getTextureUnitForTexture(texture: vtkTexture): number;
+  /**
+   *
+   */
+  setContext2D(context2D: CanvasRenderingContext2D | undefined): boolean;
 
-	/**
-	 *
-	 * @param {VtkDataTypes} vtktype 
-	 * @param {Number} numComps 
-	 * @param {Boolean} useFloat 
-	 * @param {unknown} oglNorm16Ext The WebGL EXT_texture_norm16 extension context
-	 * @param {Boolean} useHalfFloat
-	 */
-	getDefaultTextureInternalFormat(vtktype: VtkDataTypes, numComps: number, oglNorm16Ext?: unknown, useHalfFloat?: boolean): void;
+  /**
+   *
+   */
+  restoreContext(): void;
 
-	/**
-	 * 
-	 * @param {HTMLImageElement} img The background image.
-	 */
-	setBackgroundImage(img: HTMLImageElement): void;
+  /**
+   *
+   * @param {vtkTexture} texture
+   */
+  activateTexture(texture: vtkTexture): void;
 
-	/**
-	 * 
-	 * @param {Boolean} value
-	 */
-	setUseBackgroundImage(value: boolean): void;
+  /**
+   *
+   * @param {vtkTexture} texture
+   */
+  deactivateTexture(texture: vtkTexture): void;
 
-	/**
-	 * Capture a screenshot of the contents of this renderwindow.  The options
-	 * object can include a `size` array (`[w, h]`) or a `scale` floating point
-	 * value, as well as a `resetCamera` boolean.  If `size` is provided, the
-	 * captured screenshot will be of the given size (and `resetCamera` could be
-	 * useful in this case if the aspect ratio of `size` does not match the
-	 * current renderwindow size).  Otherwise, if `scale` is provided, it will
-	 * be multiplied by the current renderwindow size to compute the screenshot
-	 * size.  If no `size` or `scale` are provided, the current renderwindow
-	 * size is assumed.  The default format is "image/png". Returns a promise
-	 * that resolves to the captured screenshot.
-	 * @param {String} format
-	 * @param {ICaptureOptions} options
-	 */
-	captureNextImage(format: string, options?: ICaptureOptions): Nullable<Promise<string>>;
+  /**
+   *
+   * @param {vtkTexture} texture
+   */
+  getTextureUnitForTexture(texture: vtkTexture): number;
 
-	/**
-	 *
-	 */
-	getGLInformations(): object;
+  /**
+   *
+   * @param {VtkDataTypes} vtktype
+   * @param {Number} numComps
+   * @param {Boolean} useFloat
+   * @param {unknown} oglNorm16Ext The WebGL EXT_texture_norm16 extension context
+   * @param {Boolean} useHalfFloat
+   */
+  getDefaultTextureInternalFormat(
+    vtktype: VtkDataTypes,
+    numComps: number,
+    oglNorm16Ext?: unknown,
+    useHalfFloat?: boolean
+  ): void;
 
-	/**
-	 *
-	 */
-	traverseAllPasses(): void;
+  /**
+   *
+   * @param {HTMLImageElement} img The background image.
+   */
+  setBackgroundImage(img: HTMLImageElement): void;
 
-	/**
-	 *
-	 */
-	disableCullFace(): void;
+  /**
+   *
+   * @param {Boolean} value
+   */
+  setUseBackgroundImage(value: boolean): void;
 
-	/**
-	 *
-	 */
-	enableCullFace(): void;
+  /**
+   * Capture a screenshot of the contents of this renderwindow.  The options
+   * object can include a `size` array (`[w, h]`) or a `scale` floating point
+   * value, as well as a `resetCamera` boolean.  If `size` is provided, the
+   * captured screenshot will be of the given size (and `resetCamera` could be
+   * useful in this case if the aspect ratio of `size` does not match the
+   * current renderwindow size).  Otherwise, if `scale` is provided, it will
+   * be multiplied by the current renderwindow size to compute the screenshot
+   * size.  If no `size` or `scale` are provided, the current renderwindow
+   * size is assumed.  The default format is "image/png". Returns a promise
+   * that resolves to the captured screenshot.
+   * @param {String} format
+   * @param {ICaptureOptions} options
+   */
+  captureNextImage(
+    format: string,
+    options?: ICaptureOptions
+  ): Nullable<Promise<string>>;
 
-	/**
-	 *
-	 * @param {vtkViewStream} stream The vtkViewStream instance.
-	 */
-	setViewStream(stream: vtkViewStream): boolean;
+  /**
+   *
+   */
+  getGLInformations(): object;
 
-	/**
-	 * Sets the pixel width and height of the rendered image.  
-	 * 
-	 * WebGL and WebGPU render windows apply these values to 
-	 * the width and height attribute of the canvas element.
-	 * 
-	 * To match the device resolution in browser environments, 
-	 * multiply the container size by `window.devicePixelRatio`
-	 * `apiSpecificRenderWindow.setSize(Math.floor(containerWidth * devicePixelRatio), Math.floor(containerHeight * devicePixelRatio));
-	 * See the VTK.js FullscreenRenderWindow class for an example.
-	 * 
-	 * @see getComputedDevicePixelRatio()
-	 * 
-	 * @param {Vector2} size 
-	 */
-	setSize(size: Vector2): void;
+  /**
+   *
+   */
+  traverseAllPasses(): void;
 
-	/**
-	 *
-	 * @param {Number} x 
-	 * @param {Number} y 
-	 */
-	setSize(x: number, y: number): void;
+  /**
+   *
+   */
+  disableCullFace(): void;
 
-	/**
-	 *
-	 */
-	getSize(): Vector2;
+  /**
+   *
+   */
+  enableCullFace(): void;
 
-	/**
-	 * Scales the size of a browser CSS pixel to a rendered canvas pixel.  
-	 * `const renderedPixelWidth = cssPixelWidth * apiRenderWindow.getComputedDevicePixelRatio()`
-	 * Use to scale rendered objects to a consistent perceived size or DOM pixel position.
-	 * 
-	 * Rather than using window.devicePixelRatio directly, the device pixel ratio is inferred
-	 * from the container CSS pixel size and rendered image pixel size. The user directly sets the rendered pixel size.
-	 * 
-	 * @see setSize()
-	 * @see getContainerSize()
-	 */
-	getComputedDevicePixelRatio(): number;
+  /**
+   *
+   * @param {vtkViewStream} stream The vtkViewStream instance.
+   */
+  setViewStream(stream: vtkViewStream): boolean;
 
-	/**
-	 * Set graphics resources for vtk objects to be cached at the context level.
-	 * This provides mappers with a convenient API to re-use allocated GPU resources
-	 * without duplication.
-	 *
-	 * @param {Object} vtkObj VTK data object / array with resources on the GPU
-	 * @param {Object} gObj Container object that maintains a handle to the graphics resource on the GPU
-	 * @param {String} hash String hash that can be used by mappers to decide whether to discard or re-allocate
-	 * the cached resource.
-	 */
-	setGraphicsResourceForObject(vtkObj: vtkCellArray | vtkDataArray | vtkPoints, gObj: vtkOpenGLTexture | vtkBufferObject, hash: string): void;
+  /**
+   * Sets the pixel width and height of the rendered image.
+   *
+   * WebGL and WebGPU render windows apply these values to
+   * the width and height attribute of the canvas element.
+   *
+   * To match the device resolution in browser environments,
+   * multiply the container size by `window.devicePixelRatio`
+   * `apiSpecificRenderWindow.setSize(Math.floor(containerWidth * devicePixelRatio), Math.floor(containerHeight * devicePixelRatio));
+   * See the VTK.js FullscreenRenderWindow class for an example.
+   *
+   * @see getComputedDevicePixelRatio()
+   *
+   * @param {Vector2} size
+   */
+  setSize(size: Vector2): void;
 
-	/**
-	 * Get graphics resources for vtk objects cached at the context level.
-	 * This provides mappers with a convenient API to re-use allocated GPU resources
-	 * without duplication.
-	 *
-	 * @param {Object} vtkObj VTK data object / array with resources on the GPU
-	 * the cached resource.
-	 * @return {Object} Dictionary with the graphics resource and string hash
-	 */
-	getGraphicsResourceForObject(vtkObj: vtkCellArray | vtkDataArray | vtkPoints): {gObj: vtkOpenGLTexture | vtkBufferObject, hash: string};
+  /**
+   *
+   * @param {Number} x
+   * @param {Number} y
+   */
+  setSize(x: number, y: number): void;
 
-	/**
-	 * Get approximate graphics memory usage, in bytes, for the context. This is a simple computation
-	 * that analyzes how much memory is allocated on the GPU for textures, VBOs, etc. to give an
-	 * application a view of its graphics memory consumption.
-	 * Note that this ignores page resources.
-	 */
-	getGraphicsMemoryInfo(): number;
+  /**
+   *
+   */
+  getSize(): Vector2;
+
+  /**
+   * Scales the size of a browser CSS pixel to a rendered canvas pixel.
+   * `const renderedPixelWidth = cssPixelWidth * apiRenderWindow.getComputedDevicePixelRatio()`
+   * Use to scale rendered objects to a consistent perceived size or DOM pixel position.
+   *
+   * Rather than using window.devicePixelRatio directly, the device pixel ratio is inferred
+   * from the container CSS pixel size and rendered image pixel size. The user directly sets the rendered pixel size.
+   *
+   * @see setSize()
+   * @see getContainerSize()
+   */
+  getComputedDevicePixelRatio(): number;
+
+  /**
+   * Set graphics resources for vtk objects to be cached at the context level.
+   * This provides mappers with a convenient API to re-use allocated GPU resources
+   * without duplication.
+   *
+   * @param {Object} vtkObj VTK data object / array with resources on the GPU
+   * @param {Object} gObj Container object that maintains a handle to the graphics resource on the GPU
+   * @param {String} hash String hash that can be used by mappers to decide whether to discard or re-allocate
+   * the cached resource.
+   */
+  setGraphicsResourceForObject(
+    vtkObj: vtkCellArray | vtkDataArray | vtkPoints,
+    gObj: Nullable<vtkOpenGLTexture | vtkBufferObject>,
+    hash: Nullable<string>
+  ): void;
+
+  /**
+   * Get graphics resources for vtk objects cached at the context level.
+   * This provides mappers with a convenient API to re-use allocated GPU resources
+   * without duplication.
+   *
+   * @param {Object} vtkObj VTK data object / array with resources on the GPU
+   * the cached resource.
+   * @return {Object} Dictionary with the graphics resource and string hash
+   */
+  getGraphicsResourceForObject<
+    T extends vtkCellArray | vtkDataArray | vtkPoints
+  >(
+    vtkObj: T
+  ):
+    | {
+        coreObject: T;
+        oglObject: Nullable<vtkOpenGLTexture | vtkBufferObject>;
+        hash: Nullable<string>;
+      }
+    | undefined;
+
+  /**
+   * Get approximate graphics memory usage, in bytes, for the context. This is a simple computation
+   * that analyzes how much memory is allocated on the GPU for textures, VBOs, etc. to give an
+   * application a view of its graphics memory consumption.
+   * Note that this ignores page resources.
+   */
+  getGraphicsMemoryInfo(): number;
 }
 
 /**
@@ -400,13 +477,19 @@ export interface vtkOpenGLRenderWindow extends vtkOpenGLRenderWindowBase {
  * @param model object on which data structure will be bounds (protected)
  * @param {IOpenGLRenderWindowInitialValues} [initialValues] (default: {})
  */
-export function extend(publicAPI: object, model: object, initialValues?: IOpenGLRenderWindowInitialValues): void;
+export function extend(
+  publicAPI: object,
+  model: object,
+  initialValues?: IOpenGLRenderWindowInitialValues
+): void;
 
 /**
  * Method used to create a new instance of vtkOpenGLRenderWindow.
  * @param {IOpenGLRenderWindowInitialValues} [initialValues] for pre-setting some of its content
  */
-export function newInstance(initialValues?: IOpenGLRenderWindowInitialValues): vtkOpenGLRenderWindow;
+export function newInstance(
+  initialValues?: IOpenGLRenderWindowInitialValues
+): vtkOpenGLRenderWindow;
 
 /**
  *
@@ -426,9 +509,9 @@ export function popMonitorGLContextCount(cb: any): void;
  * vtkOpenGLRenderWindow is designed to view/render a vtkRenderWindow.
  */
 export declare const vtkOpenGLRenderWindow: {
-	newInstance: typeof newInstance,
-	extend: typeof extend,
-	pushMonitorGLContextCount: typeof pushMonitorGLContextCount,
-	popMonitorGLContextCount: typeof popMonitorGLContextCount,
+  newInstance: typeof newInstance;
+  extend: typeof extend;
+  pushMonitorGLContextCount: typeof pushMonitorGLContextCount;
+  popMonitorGLContextCount: typeof popMonitorGLContextCount;
 };
 export default vtkOpenGLRenderWindow;

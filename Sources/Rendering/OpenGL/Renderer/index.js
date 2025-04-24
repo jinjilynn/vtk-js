@@ -24,7 +24,10 @@ function vtkOpenGLRenderer(publicAPI, model) {
       publicAPI.updateLights();
       publicAPI.prepareNodes();
       publicAPI.addMissingNode(model.renderable.getActiveCamera());
-      publicAPI.addMissingNodes(model.renderable.getViewPropsWithNestedProps());
+      publicAPI.addMissingNodes(
+        model.renderable.getViewPropsWithNestedProps(),
+        true
+      );
       publicAPI.removeUnusedNodes();
     }
   };
@@ -137,19 +140,14 @@ function vtkOpenGLRenderer(publicAPI, model) {
     if (!model.renderable.getTransparent()) {
       const background = model.renderable.getBackgroundByReference();
       // renderable ensures that background has 4 entries.
-      model.context.clearColor(
-        background[0],
-        background[1],
-        background[2],
-        background[3]
-      );
+      gl.clearColor(background[0], background[1], background[2], background[3]);
       clearMask |= gl.COLOR_BUFFER_BIT;
     }
 
     if (!model.renderable.getPreserveDepthBuffer()) {
       gl.clearDepth(1.0);
       clearMask |= gl.DEPTH_BUFFER_BIT;
-      model.context.depthMask(true);
+      gl.depthMask(true);
     }
 
     gl.colorMask(true, true, true, true);

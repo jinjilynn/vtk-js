@@ -27,6 +27,269 @@ function notImplemented(method) {
   return () => macro.vtkErrorMacro(`vtkMapper::${method} - NOT IMPLEMENTED`);
 }
 
+/**
+ * Increase by one the 3D coordinates
+ * It will follow a zigzag pattern so that each coordinate is the neighbor of the next coordinate
+ * This enables interpolation between two texels without issues
+ * Note: texture coordinates can't be interpolated using this pattern
+ * @param {vec3} coordinates The 3D coordinates using integers for each coorinate
+ * @param {vec3} dimensions The 3D dimensions of the volume
+ */
+function updateZigzaggingCoordinates(coordinates, dimensions) {
+  const directionX = coordinates[1] % 2 === 0 ? 1 : -1;
+  coordinates[0] += directionX;
+  if (coordinates[0] >= dimensions[0] || coordinates[0] < 0) {
+    const directionY = coordinates[2] % 2 === 0 ? 1 : -1;
+    coordinates[0] -= directionX;
+    coordinates[1] += directionY;
+    if (coordinates[1] >= dimensions[1] || coordinates[1] < 0) {
+      coordinates[1] -= directionY;
+      coordinates[2]++;
+    }
+  }
+}
+
+/**
+ * Returns the index in the array representing the volume from a 3D coordinate
+ * @param {vec3} coordinates The 3D integer coordinates
+ * @param {vec3} dimensions The 3D dimensions of the volume
+ * @returns The index in a flat array representing the volume
+ */
+function getIndexFromCoordinates(coordinates, dimensions) {
+  return (
+    coordinates[0] +
+    dimensions[0] * (coordinates[1] + dimensions[1] * coordinates[2])
+  );
+}
+
+/**
+ * Write texture coordinates for the given `texelIndexPosition` in `textureCoordinate`.
+ * The `texelIndexPosition` is a floating point number that represents the distance in index space
+ * from the center of the first texel to the final output position.
+ * The output is given in texture coordinates and not in index coordinates (this is done at the very end of the function)
+ * @param {vec3} textureCoordinate The output texture coordinates (to avoid allocating a new Array)
+ * @param {Number} texelIndexPosition The floating point distance from the center of the first texel, following a zigzag pattern
+ * @param {vec3} dimensions The 3D dimensions of the volume
+ */
+function getZigZagTextureCoordinatesFromTexelPosition(
+  textureCoordinate,
+  texelIndexPosition,
+  dimensions
+) {
+  // First compute the integer textureCoordinate
+  const intTexelIndex = Math.floor(texelIndexPosition);
+  const xCoordBeforeWrap = intTexelIndex % (2 * dimensions[0]);
+  let xDirection;
+  let xEndFlag;
+  if (xCoordBeforeWrap < dimensions[0]) {
+    textureCoordinate[0] = xCoordBeforeWrap;
+    xDirection = 1;
+    xEndFlag = textureCoordinate[0] === dimensions[0] - 1;
+  } else {
+    textureCoordinate[0] = 2 * dimensions[0] - 1 - xCoordBeforeWrap;
+    xDirection = -1;
+    xEndFlag = textureCoordinate[0] === 0;
+  }
+
+  const intRowIndex = Math.floor(intTexelIndex / dimensions[0]);
+  const yCoordBeforeWrap = intRowIndex % (2 * dimensions[1]);
+  let yDirection;
+  let yEndFlag;
+  if (yCoordBeforeWrap < dimensions[1]) {
+    textureCoordinate[1] = yCoordBeforeWrap;
+    yDirection = 1;
+    yEndFlag = textureCoordinate[1] === dimensions[1] - 1;
+  } else {
+    textureCoordinate[1] = 2 * dimensions[1] - 1 - yCoordBeforeWrap;
+    yDirection = -1;
+    yEndFlag = textureCoordinate[1] === 0;
+  }
+
+  textureCoordinate[2] = Math.floor(intRowIndex / dimensions[1]);
+
+  // Now add the remainder either in x, y or z
+  const remainder = texelIndexPosition - intTexelIndex;
+  if (xEndFlag) {
+    if (yEndFlag) {
+      textureCoordinate[2] += remainder;
+    } else {
+      textureCoordinate[1] += yDirection * remainder;
+    }
+  } else {
+    textureCoordinate[0] += xDirection * remainder;
+  }
+
+  // textureCoordinates are in index space, convert to texture space
+  textureCoordinate[0] = (textureCoordinate[0] + 0.5) / dimensions[0];
+  textureCoordinate[1] = (textureCoordinate[1] + 0.5) / dimensions[1];
+  textureCoordinate[2] = (textureCoordinate[2] + 0.5) / dimensions[2];
+}
+
+// Associate an input vtkDataArray to an object { stringHash, textureCoordinates }
+// A single dataArray only caches one array of texture coordinates, so this cache is useless when
+// the input data array is used with two different lookup tables (which is very unlikely)
+const colorTextureCoordinatesCache = new WeakMap();
+/**
+ * The minimum of the range is mapped to the center of the first texel excluding min texel (texel at index distance 1)
+ * The maximum of the range is mapped to the center of the last texel excluding max and NaN texels (texel at index distance numberOfColorsInRange)
+ * The result is cached, and is reused if the arguments are the same and the input doesn't change
+ * @param {vtkDataArray} input The input data array used for coloring
+ * @param {Number} component The component of the input data array that is used for coloring (-1 for magnitude of the vectors)
+ * @param {Range} range The range of the scalars
+ * @param {Number} numberOfColorsInRange The number of colors that are used in the range
+ * @param {vec3} dimensions The dimensions of the texture
+ * @param {boolean} useLogScale If log scale should be used to transform input scalars
+ * @param {boolean} useZigzagPattern If a zigzag pattern should be used. Otherwise 1 row for colors (including min and max) and 1 row for NaN are used.
+ * @returns A vtkDataArray containing the texture coordinates (2D or 3D)
+ */
+function getOrCreateColorTextureCoordinates(
+  input,
+  component,
+  range,
+  numberOfColorsInRange,
+  dimensions,
+  useLogScale,
+  useZigzagPattern
+) {
+  // Caching using the "arguments" special object (because it is a pure function)
+  const argStrings = new Array(arguments.length);
+  for (let argIndex = 0; argIndex < arguments.length; ++argIndex) {
+    // eslint-disable-next-line prefer-rest-params
+    const arg = arguments[argIndex];
+    argStrings[argIndex] = arg.getMTime?.() ?? arg;
+  }
+  const stringHash = argStrings.join('/');
+
+  const cachedResult = colorTextureCoordinatesCache.get(input);
+  if (cachedResult && cachedResult.stringHash === stringHash) {
+    return cachedResult.textureCoordinates;
+  }
+
+  // The range used for computing coordinates have to change
+  // slightly to accommodate the special above- and below-range
+  // colors that are the first and last texels, respectively.
+  const scalarTexelWidth = (range[1] - range[0]) / (numberOfColorsInRange - 1);
+  const [paddedRangeMin, paddedRangeMax] = [
+    range[0] - scalarTexelWidth,
+    range[1] + scalarTexelWidth,
+  ];
+
+  // Use the center of the voxel
+  const textureSOrigin = paddedRangeMin - 0.5 * scalarTexelWidth;
+  const textureSCoeff =
+    1.0 / (paddedRangeMax - paddedRangeMin + scalarTexelWidth);
+
+  // Compute in index space first
+  const texelIndexOrigin = paddedRangeMin;
+  const texelIndexCoeff =
+    (numberOfColorsInRange + 1) / (paddedRangeMax - paddedRangeMin);
+
+  const inputV = input.getData();
+  const numScalars = input.getNumberOfTuples();
+  const numComps = input.getNumberOfComponents();
+  const useMagnitude = component < 0 || component >= numComps;
+  const numberOfOutputComponents = dimensions[2] <= 1 ? 2 : 3;
+  const output = vtkDataArray.newInstance({
+    numberOfComponents: numberOfOutputComponents,
+    values: new Float32Array(numScalars * numberOfOutputComponents),
+  });
+  const outputV = output.getData();
+
+  const nanTextureCoordinate = [0, 0, 0];
+  // Distance of NaN from the beginning:
+  // min: 0, ...colorsInRange, max: numberOfColorsInRange + 1, NaN = numberOfColorsInRange + 2
+  getZigZagTextureCoordinatesFromTexelPosition(
+    nanTextureCoordinate,
+    numberOfColorsInRange + 2,
+    dimensions
+  );
+
+  // Set a texture coordinate in the output for each tuple in the input
+  let inputIdx = 0;
+  let outputIdx = 0;
+  const textureCoordinate = [0.5, 0.5, 0.5];
+  for (let scalarIdx = 0; scalarIdx < numScalars; ++scalarIdx) {
+    // Get scalar value from magnitude or a single component
+    let scalarValue;
+    if (useMagnitude) {
+      let sum = 0;
+      for (let compIdx = 0; compIdx < numComps; ++compIdx) {
+        const compValue = inputV[inputIdx + compIdx];
+        sum += compValue * compValue;
+      }
+      scalarValue = Math.sqrt(sum);
+    } else {
+      scalarValue = inputV[inputIdx + component];
+    }
+    inputIdx += numComps;
+
+    // Apply log scale if necessary
+    if (useLogScale) {
+      scalarValue = vtkLookupTable.applyLogScale(scalarValue, range, range);
+    }
+
+    // Convert to texture coordinates and update output
+    if (vtkMath.isNan(scalarValue)) {
+      // Last texels are NaN colors (there is at least one NaN color)
+      textureCoordinate[0] = nanTextureCoordinate[0];
+      textureCoordinate[1] = nanTextureCoordinate[1];
+      textureCoordinate[2] = nanTextureCoordinate[2];
+    } else if (useZigzagPattern) {
+      // Texel position is in [0, numberOfColorsInRange + 1]
+      let texelIndexPosition =
+        (scalarValue - texelIndexOrigin) * texelIndexCoeff;
+      if (texelIndexPosition < 1) {
+        // Use min color when smaller than range
+        texelIndexPosition = 0;
+      } else if (texelIndexPosition > numberOfColorsInRange) {
+        // Use max color when greater than range
+        texelIndexPosition = numberOfColorsInRange + 1;
+      }
+
+      // Convert the texel position into texture coordinate following a zigzag pattern
+      getZigZagTextureCoordinatesFromTexelPosition(
+        textureCoordinate,
+        texelIndexPosition,
+        dimensions
+      );
+    } else {
+      // 0.0 in t coordinate means not NaN.  So why am I setting it to 0.49?
+      // Because when you are mapping scalars and you have a NaN adjacent to
+      // anything else, the interpolation everywhere should be NaN.  Thus, I
+      // want the NaN color everywhere except right on the non-NaN neighbors.
+      // To simulate this, I set the t coord for the real numbers close to
+      // the threshold so that the interpolation almost immediately looks up
+      // the NaN value.
+      textureCoordinate[1] = 0.49;
+
+      // Some implementations apparently don't handle relatively large
+      // numbers (compared to the range [0.0, 1.0]) very well. In fact,
+      // values above 1122.0f appear to cause texture wrap-around on
+      // some systems even when edge clamping is enabled. Why 1122.0f? I
+      // don't know. For safety, we'll clamp at +/- 1000. This will
+      // result in incorrect images when the texture value should be
+      // above or below 1000, but I don't have a better solution.
+      const textureS = (scalarValue - textureSOrigin) * textureSCoeff;
+      if (textureS > 1000.0) {
+        textureCoordinate[0] = 1000.0;
+      } else if (textureS < -1000.0) {
+        textureCoordinate[0] = -1000.0;
+      } else {
+        textureCoordinate[0] = textureS;
+      }
+    }
+    for (let i = 0; i < numberOfOutputComponents; ++i) {
+      outputV[outputIdx++] = textureCoordinate[i];
+    }
+  }
+
+  colorTextureCoordinatesCache.set(input, {
+    stringHash,
+    textureCoordinates: output,
+  });
+  return output;
+}
+
 // ----------------------------------------------------------------------------
 // vtkMapper methods
 // ----------------------------------------------------------------------------
@@ -90,7 +353,7 @@ function vtkMapper(publicAPI, model) {
   ) => {
     // make sure we have an input
     if (!input || !model.scalarVisibility) {
-      return { scalars: null, cellFLag: false };
+      return { scalars: null, cellFlag: false };
     }
 
     let scalars = null;
@@ -136,13 +399,14 @@ function vtkMapper(publicAPI, model) {
   };
 
   publicAPI.mapScalars = (input, alpha) => {
-    const scalars = publicAPI.getAbstractScalars(
+    const { scalars, cellFlag } = publicAPI.getAbstractScalars(
       input,
       model.scalarMode,
       model.arrayAccessMode,
       model.arrayId,
       model.colorByArrayName
-    ).scalars;
+    );
+    model.areScalarsMappedFromCells = cellFlag;
 
     if (!scalars) {
       model.colorCoordinates = null;
@@ -164,8 +428,8 @@ function vtkMapper(publicAPI, model) {
     // Decide between texture color or vertex color.
     // Cell data always uses vertex color.
     // Only point data can use both texture and vertex coloring.
-    if (publicAPI.canUseTextureMapForColoring(input)) {
-      publicAPI.mapScalarsToTexture(scalars, alpha);
+    if (publicAPI.canUseTextureMapForColoring(scalars, cellFlag)) {
+      model.mapScalarsToTexture(scalars, cellFlag, alpha);
     } else {
       model.colorCoordinates = null;
       model.colorTextureMap = null;
@@ -184,120 +448,8 @@ function vtkMapper(publicAPI, model) {
     model.colorBuildString = `${publicAPI.getMTime()}${scalars.getMTime()}${alpha}`;
   };
 
-  //-----------------------------------------------------------------------------
-  publicAPI.scalarToTextureCoordinate = (
-    scalarValue, // Input scalar
-    rangeMin, // range[0]
-    invRangeWidth
-  ) => {
-    // 1/(range[1]-range[0])
-    let texCoordS = 0.5; // Scalar value is arbitrary when NaN
-    let texCoordT = 1.0; // 1.0 in t coordinate means NaN
-    if (!vtkMath.isNan(scalarValue)) {
-      // 0.0 in t coordinate means not NaN.  So why am I setting it to 0.49?
-      // Because when you are mapping scalars and you have a NaN adjacent to
-      // anything else, the interpolation everywhere should be NaN.  Thus, I
-      // want the NaN color everywhere except right on the non-NaN neighbors.
-      // To simulate this, I set the t coord for the real numbers close to
-      // the threshold so that the interpolation almost immediately looks up
-      // the NaN value.
-      texCoordT = 0.49;
-
-      texCoordS = (scalarValue - rangeMin) * invRangeWidth;
-
-      // Some implementations apparently don't handle relatively large
-      // numbers (compared to the range [0.0, 1.0]) very well. In fact,
-      // values above 1122.0f appear to cause texture wrap-around on
-      // some systems even when edge clamping is enabled. Why 1122.0f? I
-      // don't know. For safety, we'll clamp at +/- 1000. This will
-      // result in incorrect images when the texture value should be
-      // above or below 1000, but I don't have a better solution.
-      if (texCoordS > 1000.0) {
-        texCoordS = 1000.0;
-      } else if (texCoordS < -1000.0) {
-        texCoordS = -1000.0;
-      }
-    }
-    return { texCoordS, texCoordT };
-  };
-
-  //-----------------------------------------------------------------------------
-  publicAPI.createColorTextureCoordinates = (
-    input,
-    output,
-    numScalars,
-    numComps,
-    component,
-    range,
-    tableRange,
-    tableNumberOfColors,
-    useLogScale
-  ) => {
-    // We have to change the range used for computing texture
-    // coordinates slightly to accommodate the special above- and
-    // below-range colors that are the first and last texels,
-    // respectively.
-    const scalarTexelWidth = (range[1] - range[0]) / tableNumberOfColors;
-
-    const paddedRange = [];
-    paddedRange[0] = range[0] - scalarTexelWidth;
-    paddedRange[1] = range[1] + scalarTexelWidth;
-    const invRangeWidth = 1.0 / (paddedRange[1] - paddedRange[0]);
-
-    const outputV = output.getData();
-    const inputV = input.getData();
-
-    let count = 0;
-    let outputCount = 0;
-    if (component < 0 || component >= numComps) {
-      for (let scalarIdx = 0; scalarIdx < numScalars; ++scalarIdx) {
-        let sum = 0;
-        for (let compIdx = 0; compIdx < numComps; ++compIdx) {
-          sum += inputV[count] * inputV[count];
-          count++;
-        }
-        let magnitude = Math.sqrt(sum);
-        if (useLogScale) {
-          magnitude = vtkLookupTable.applyLogScale(
-            magnitude,
-            tableRange,
-            range
-          );
-        }
-        const outputs = publicAPI.scalarToTextureCoordinate(
-          magnitude,
-          paddedRange[0],
-          invRangeWidth
-        );
-        outputV[outputCount] = outputs.texCoordS;
-        outputV[outputCount + 1] = outputs.texCoordT;
-        outputCount += 2;
-      }
-    } else {
-      count += component;
-      for (let scalarIdx = 0; scalarIdx < numScalars; ++scalarIdx) {
-        let inputValue = inputV[count];
-        if (useLogScale) {
-          inputValue = vtkLookupTable.applyLogScale(
-            inputValue,
-            tableRange,
-            range
-          );
-        }
-        const outputs = publicAPI.scalarToTextureCoordinate(
-          inputValue,
-          paddedRange[0],
-          invRangeWidth
-        );
-        outputV[outputCount] = outputs.texCoordS;
-        outputV[outputCount + 1] = outputs.texCoordT;
-        outputCount += 2;
-        count += numComps;
-      }
-    }
-  };
-
-  publicAPI.mapScalarsToTexture = (scalars, alpha) => {
+  // Protected method
+  model.mapScalarsToTexture = (scalars, cellFlag, alpha) => {
     const range = model.lookupTable.getRange();
     const useLogScale = model.lookupTable.usingLogScale();
     if (useLogScale) {
@@ -327,89 +479,115 @@ function vtkMapper(publicAPI, model) {
       // Create a dummy ramp of scalars.
       // In the future, we could extend vtkScalarsToColors.
       model.lookupTable.build();
-      let numberOfColors = model.lookupTable.getNumberOfAvailableColors();
-      if (numberOfColors > 4094) {
-        numberOfColors = 4094;
-      }
-      if (numberOfColors < 64) {
-        numberOfColors = 64;
-      }
-      numberOfColors += 2;
-      const k = (range[1] - range[0]) / (numberOfColors - 2);
+      const numberOfAvailableColors =
+        model.lookupTable.getNumberOfAvailableColors();
 
-      const newArray = new Float64Array(numberOfColors * 2);
+      // Maximum dimensions and number of colors in range
+      const maxTextureWidthForCells = 2048;
+      const maxColorsInRangeForCells = maxTextureWidthForCells ** 3 - 3; // 3D but keep a color for min, max and NaN
+      const maxTextureWidthForPoints = 4096;
+      const maxColorsInRangeForPoints = maxTextureWidthForPoints - 2; // 1D but keep a color for min and max (NaN is in a different row)
+      // Minimum number of colors in range (excluding special colors like minColor, maxColor and NaNColor)
+      const minColorsInRange = 2;
+      // Maximum number of colors, limited by the maximum possible texture size
+      const maxColorsInRange = cellFlag
+        ? maxColorsInRangeForCells
+        : maxColorsInRangeForPoints;
 
-      for (let i = 0; i < numberOfColors; ++i) {
-        newArray[i] = range[0] + i * k - k / 2.0; // minus k / 2 to start at below range color
-        if (useLogScale) {
-          newArray[i] = 10.0 ** newArray[i];
-        }
+      model.numberOfColorsInRange = Math.min(
+        Math.max(numberOfAvailableColors, minColorsInRange),
+        maxColorsInRange
+      );
+      const numberOfColorsForCells = model.numberOfColorsInRange + 3; // Add min, max and NaN
+      const numberOfColorsInUpperRowForPoints = model.numberOfColorsInRange + 2; // Add min and max ; the lower row will be used for NaN color
+      const textureDimensions = cellFlag
+        ? [
+            Math.min(
+              Math.ceil(numberOfColorsForCells / maxTextureWidthForCells ** 0),
+              maxTextureWidthForCells
+            ),
+            Math.min(
+              Math.ceil(numberOfColorsForCells / maxTextureWidthForCells ** 1),
+              maxTextureWidthForCells
+            ),
+            Math.min(
+              Math.ceil(numberOfColorsForCells / maxTextureWidthForCells ** 2),
+              maxTextureWidthForCells
+            ),
+          ]
+        : [numberOfColorsInUpperRowForPoints, 2, 1];
+      const textureSize =
+        textureDimensions[0] * textureDimensions[1] * textureDimensions[2];
+
+      const scalarsArray = new Float64Array(textureSize);
+
+      // Colors for NaN by default
+      scalarsArray.fill(NaN);
+
+      // Colors in range
+      // Add 2 to also get color for min and max
+      const numberOfNonSpecialColors = model.numberOfColorsInRange;
+      const numberOfNonNaNColors = numberOfNonSpecialColors + 2;
+      const textureCoordinates = [0, 0, 0];
+      const rangeMin = range[0];
+      const rangeDifference = range[1] - range[0];
+      for (let i = 0; i < numberOfNonNaNColors; ++i) {
+        const scalarsArrayIndex = getIndexFromCoordinates(
+          textureCoordinates,
+          textureDimensions
+        );
+
+        // Minus 1 start at min color
+        const scalarValue =
+          rangeMin +
+          (rangeDifference * (i - 1)) / (numberOfNonSpecialColors - 1);
+        scalarsArray[scalarsArrayIndex] = useLogScale
+          ? 10.0 ** scalarValue
+          : scalarValue;
+
+        // Colors are zigzagging to allow interpolation between two neighbor colors when coloring cells
+        updateZigzaggingCoordinates(textureCoordinates, textureDimensions);
       }
-      // Dimension on NaN.
-      for (let i = 0; i < numberOfColors; ++i) {
-        newArray[i + numberOfColors] = NaN;
-      }
+
+      const scalarsDataArray = vtkDataArray.newInstance({
+        numberOfComponents: 1,
+        values: scalarsArray,
+      });
+      const colorsDataArray = model.lookupTable.mapScalars(
+        scalarsDataArray,
+        model.colorMode,
+        0
+      );
 
       model.colorTextureMap = vtkImageData.newInstance();
-      model.colorTextureMap.setExtent(0, numberOfColors - 1, 0, 1, 0, 0);
+      model.colorTextureMap.setDimensions(textureDimensions);
+      model.colorTextureMap.getPointData().setScalars(colorsDataArray);
 
-      const tmp = vtkDataArray.newInstance({
-        numberOfComponents: 1,
-        values: newArray,
-      });
-
-      model.colorTextureMap
-        .getPointData()
-        .setScalars(model.lookupTable.mapScalars(tmp, model.colorMode, 0));
       model.lookupTable.setAlpha(origAlpha);
     }
 
-    // Create new coordinates if necessary.
-    // Need to compare lookup table in case the range has changed.
-    if (
-      !model.colorCoordinates ||
-      publicAPI.getMTime() > model.colorCoordinates.getMTime() ||
-      publicAPI.getInputData(0).getMTime() >
-        model.colorCoordinates.getMTime() ||
-      model.lookupTable.getMTime() > model.colorCoordinates.getMTime()
-    ) {
-      // Get rid of old colors
-      model.colorCoordinates = null;
+    // Although I like the feature of applying magnitude to single component
+    // scalars, it is not how the old MapScalars for vertex coloring works.
+    const scalarComponent =
+      model.lookupTable.getVectorMode() === VectorMode.MAGNITUDE &&
+      scalars.getNumberOfComponents() > 1
+        ? -1
+        : model.lookupTable.getVectorComponent();
 
-      // Now create the color texture coordinates.
-      const numComps = scalars.getNumberOfComponents();
-      const num = scalars.getNumberOfTuples();
-
-      // const fArray = new FloatArray(num * 2);
-      model.colorCoordinates = vtkDataArray.newInstance({
-        numberOfComponents: 2,
-        values: new Float32Array(num * 2),
-      });
-
-      let scalarComponent = model.lookupTable.getVectorComponent();
-      // Although I like the feature of applying magnitude to single component
-      // scalars, it is not how the old MapScalars for vertex coloring works.
-      if (
-        model.lookupTable.getVectorMode() === VectorMode.MAGNITUDE &&
-        scalars.getNumberOfComponents() > 1
-      ) {
-        scalarComponent = -1;
-      }
-
-      publicAPI.createColorTextureCoordinates(
-        scalars,
-        model.colorCoordinates,
-        num,
-        numComps,
-        scalarComponent,
-        range,
-        model.lookupTable.getRange(),
-        model.colorTextureMap.getPointData().getScalars().getNumberOfTuples() /
-          2 -
-          2,
-        useLogScale
-      );
-    }
+    // Create new coordinates if necessary, this function uses cache if possible.
+    // A zigzag pattern can't be used with point data, as interpolation of texture coordinates will be wrong
+    // A zigzag pattern can be used with cell data, as there will be no texture coordinates interpolation
+    // The texture generated using a zigzag pattern in one dimension is the same as without zigzag
+    // Therefore, the same code can be used for texture generation of point/cell data but not for texture coordinates
+    model.colorCoordinates = getOrCreateColorTextureCoordinates(
+      scalars,
+      scalarComponent,
+      range,
+      model.numberOfColorsInRange,
+      model.colorTextureMap.getDimensions(),
+      useLogScale,
+      cellFlag
+    );
   };
 
   publicAPI.getIsOpaque = () => {
@@ -435,7 +613,11 @@ function vtkMapper(publicAPI, model) {
     return true;
   };
 
-  publicAPI.canUseTextureMapForColoring = (input) => {
+  publicAPI.canUseTextureMapForColoring = (scalars, cellFlag) => {
+    if (cellFlag && !(model.colorMode === ColorMode.DIRECT_SCALARS)) {
+      return true; // cell data always use textures.
+    }
+
     if (!model.interpolateScalarsBeforeMapping) {
       return false; // user doesn't want us to use texture maps at all.
     }
@@ -445,22 +627,9 @@ function vtkMapper(publicAPI, model) {
       return false;
     }
 
-    const gasResult = publicAPI.getAbstractScalars(
-      input,
-      model.scalarMode,
-      model.arrayAccessMode,
-      model.arrayId,
-      model.colorByArrayName
-    );
-    const scalars = gasResult.scalars;
-
     if (!scalars) {
       // no scalars on this dataset, we don't care if texture is used at all.
       return false;
-    }
-
-    if (gasResult.cellFlag) {
-      return false; // cell data colors, don't use textures.
     }
 
     if (
@@ -571,11 +740,11 @@ function vtkMapper(publicAPI, model) {
         let inValue = 0;
         inValue += rawHighData[pos];
         inValue *= 256;
-        inValue += rawLowData[pos];
+        inValue += rawLowData[pos + 2];
         inValue *= 256;
         inValue += rawLowData[pos + 1];
         inValue *= 256;
-        inValue += rawLowData[pos + 2];
+        inValue += rawLowData[pos];
 
         const outValue = idMap[inValue];
         const highData = selector.getPixelBuffer(PassTypes.ID_HIGH24);
@@ -592,6 +761,7 @@ function vtkMapper(publicAPI, model) {
 
 const DEFAULT_VALUES = {
   colorMapColors: null, // Same as this->Colors
+  areScalarsMappedFromCells: false,
 
   static: false,
   lookupTable: null,
@@ -616,6 +786,7 @@ const DEFAULT_VALUES = {
   interpolateScalarsBeforeMapping: false,
   colorCoordinates: null,
   colorTextureMap: null,
+  numberOfColorsInRange: 0,
 
   forceCompileOnly: 0,
 
@@ -634,9 +805,11 @@ export function extend(publicAPI, model, initialValues = {}) {
   vtkAbstractMapper3D.extend(publicAPI, model, initialValues);
 
   macro.get(publicAPI, model, [
+    'areScalarsMappedFromCells',
     'colorCoordinates',
     'colorMapColors',
     'colorTextureMap',
+    'numberOfColorsInRange',
     'selectionWebGLIdsToVTKIds',
   ]);
   macro.setGet(publicAPI, model, [

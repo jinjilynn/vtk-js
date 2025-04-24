@@ -143,6 +143,25 @@ function vtkRenderWindow(publicAPI, model) {
       )
       .filter((i) => !!i);
   };
+
+  publicAPI.addRenderWindow = (child) => {
+    if (model.childRenderWindows.includes(child)) {
+      return false;
+    }
+    model.childRenderWindows.push(child);
+    publicAPI.modified();
+    return true;
+  };
+
+  publicAPI.removeRenderWindow = (child) => {
+    const childIndex = model.childRenderWindows.findIndex((x) => x === child);
+    if (childIndex < 0) {
+      return false;
+    }
+    model.childRenderWindows.splice(childIndex, 1);
+    publicAPI.modified();
+    return true;
+  };
 }
 
 // ----------------------------------------------------------------------------
@@ -156,6 +175,7 @@ const DEFAULT_VALUES = {
   interactor: null,
   neverRendered: true,
   numberOfLayers: 1,
+  childRenderWindows: [],
 };
 
 // ----------------------------------------------------------------------------
@@ -173,7 +193,7 @@ export function extend(publicAPI, model, initialValues = {}) {
     'defaultViewAPI',
   ]);
   macro.get(publicAPI, model, ['neverRendered']);
-  macro.getArray(publicAPI, model, ['renderers']);
+  macro.getArray(publicAPI, model, ['renderers', 'childRenderWindows']);
   macro.moveToProtected(publicAPI, model, ['views']);
   macro.event(publicAPI, model, 'completion');
 

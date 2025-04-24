@@ -1,26 +1,33 @@
-import { Nullable } from "../../../types";
-import { InteractionMethodsName, lineNames } from "./Constants";
-import vtkAbstractWidget from "../../Core/AbstractWidget";
+import { Nullable } from '../../../types';
+import { InteractionMethodsName, lineNames } from './Constants';
+import vtkAbstractWidget from '../../Core/AbstractWidget';
 
-type TLineName = (typeof lineNames)[number];
+type TLineName = typeof lineNames[number];
 
 type TCursorStyles = {
-    [key in InteractionMethodsName]?: string;
+  [key in InteractionMethodsName]?: string;
 } & {
-  default?: string
+  default?: string;
 };
 
-export default interface vtkResliceCursorWidgetDefaultInstance extends vtkAbstractWidget {
-    getActiveInteraction(): Nullable<InteractionMethodsName>;
+export default interface vtkResliceCursorWidgetDefaultInstance
+  extends vtkAbstractWidget {
+  getActiveInteraction(): Nullable<InteractionMethodsName>;
 
-    setKeepOrthogonality(keepOrthogonality: boolean): boolean;
-    getKeepOrthogonality(): boolean;
+  getScaleInPixels(): boolean;
+  setScaleInPixels(scaleInPixels: boolean): boolean;
 
-    setCursorStyles(cursorStyles: TCursorStyles): boolean;
-    getCursorStyles(): TCursorStyles;
+  getHoleWidth(): number;
+  setHoleWidth(holeWidth: number): boolean;
 
-    setEnableTranslation(enableTranslation: boolean): void;
-    setEnableRotation(enableRotation: boolean): void;
+  setKeepOrthogonality(keepOrthogonality: boolean): boolean;
+  getKeepOrthogonality(): boolean;
 
-    getActiveLineName(): TLineName | undefined;
+  setCursorStyles(cursorStyles: TCursorStyles): boolean;
+  getCursorStyles(): TCursorStyles;
+
+  setEnableTranslation(enableTranslation: boolean): void;
+  setEnableRotation(enableRotation: boolean): void;
+
+  getActiveLineName(): TLineName | undefined;
 }

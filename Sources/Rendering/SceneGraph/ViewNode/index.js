@@ -70,49 +70,68 @@ function vtkViewNode(publicAPI, model) {
     return model._parent.getFirstAncestorOfType(type);
   };
 
+  publicAPI.getLastAncestorOfType = (type) => {
+    if (!model._parent) {
+      return null;
+    }
+    const lastAncestor = model._parent.getLastAncestorOfType(type);
+    if (lastAncestor) {
+      return lastAncestor;
+    }
+    if (model._parent.isA(type)) {
+      return model._parent;
+    }
+    return null;
+  };
+
   // add a missing node/child for the passed in renderables. This should
   // be called only in between prepareNodes and removeUnusedNodes
   publicAPI.addMissingNode = (dobj) => {
     if (!dobj) {
-      return;
+      return undefined;
     }
-    const result = model._renderableChildMap.get(dobj);
+
     // if found just mark as visited
+    const result = model._renderableChildMap.get(dobj);
     if (result !== undefined) {
       result.setVisited(true);
-    } else {
-      // otherwise create a node
-      const newNode = publicAPI.createViewNode(dobj);
-      if (newNode) {
-        newNode.setParent(publicAPI);
-        newNode.setVisited(true);
-        model._renderableChildMap.set(dobj, newNode);
-        model.children.push(newNode);
-      }
+      return result;
     }
+
+    // otherwise create a node
+    const newNode = publicAPI.createViewNode(dobj);
+    if (newNode) {
+      newNode.setParent(publicAPI);
+      newNode.setVisited(true);
+      model._renderableChildMap.set(dobj, newNode);
+      model.children.push(newNode);
+      return newNode;
+    }
+
+    return undefined;
   };
 
   // add missing nodes/children for the passed in renderables. This should
   // be called only in between prepareNodes and removeUnusedNodes
-  publicAPI.addMissingNodes = (dataObjs) => {
+  publicAPI.addMissingNodes = (dataObjs, enforceOrder = false) => {
     if (!dataObjs || !dataObjs.length) {
       return;
     }
 
     for (let index = 0; index < dataObjs.length; ++index) {
       const dobj = dataObjs[index];
-      const result = model._renderableChildMap.get(dobj);
-      // if found just mark as visited
-      if (result !== undefined) {
-        result.setVisited(true);
-      } else {
-        // otherwise create a node
-        const newNode = publicAPI.createViewNode(dobj);
-        if (newNode) {
-          newNode.setParent(publicAPI);
-          newNode.setVisited(true);
-          model._renderableChildMap.set(dobj, newNode);
-          model.children.push(newNode);
+      const node = publicAPI.addMissingNode(dobj);
+      if (
+        enforceOrder &&
+        node !== undefined &&
+        model.children[index] !== node
+      ) {
+        for (let i = index + 1; i < model.children.length; ++i) {
+          if (model.children[i] === node) {
+            model.children.splice(i, 1);
+            model.children.splice(index, 0, node);
+            break;
+          }
         }
       }
     }
@@ -133,9 +152,27 @@ function vtkViewNode(publicAPI, model) {
       if (cindex === -1) {
         child.setParent(publicAPI);
         model.children.push(child);
+        const childRenderable = child.getRenderable();
+        if (childRenderable) {
+          model._renderableChildMap.set(childRenderable, child);
+        }
       }
       child.setVisited(true);
     }
+  };
+
+  publicAPI.removeNode = (child) => {
+    const childIdx = model.children.findIndex((x) => x === child);
+    if (childIdx < 0) {
+      return false;
+    }
+    const renderable = child.getRenderable();
+    if (renderable) {
+      model._renderableChildMap.delete(renderable);
+    }
+    child.delete();
+    model.children.splice(childIdx, 1);
+    return true;
   };
 
   publicAPI.prepareNodes = () => {

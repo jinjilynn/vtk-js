@@ -1,8 +1,8 @@
 import macro from 'vtk.js/Sources/macros';
 import Constants from 'vtk.js/Sources/Rendering/WebXR/RenderWindowHelper/Constants';
-import vtkActor from '@kitware/vtk.js/Rendering/Core/Actor';
-import vtkLineSource from '@kitware/vtk.js/Filters/Sources/LineSource';
-import vtkMapper from '@kitware/vtk.js/Rendering/Core/Mapper';
+import vtkActor from 'vtk.js/Sources/Rendering/Core/Actor';
+import vtkLineSource from 'vtk.js/Sources/Filters/Sources/LineSource';
+import vtkMapper from 'vtk.js/Sources/Rendering/Core/Mapper';
 import { GET_UNDERLYING_CONTEXT } from 'vtk.js/Sources/Rendering/OpenGL/RenderWindow/ContextProxy';
 import { vec3 } from 'gl-matrix';
 
@@ -172,6 +172,15 @@ function vtkWebXRRenderWindowHelper(publicAPI, model) {
         .returnFromXRAnimation();
       const gl = model.renderWindow.get3DContext();
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+      // Remove controllers ray
+      const ren = model.renderWindow.getRenderable().getRenderers()[0];
+      model.xrSession.inputSources.forEach((inputSource) => {
+        if (model.inputSourceToRay[inputSource.handedness]) {
+          ren.removeActor(model.inputSourceToRay[inputSource.handedness].actor);
+          model.inputSourceToRay[inputSource.handedness].visible = false;
+        }
+      });
 
       await model.xrSession.end().catch((error) => {
         if (!(error instanceof DOMException)) {
@@ -397,4 +406,5 @@ export const newInstance = macro.newInstance(
 export default {
   newInstance,
   extend,
+  ...Constants,
 };

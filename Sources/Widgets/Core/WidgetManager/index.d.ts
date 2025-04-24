@@ -12,6 +12,14 @@ import { vtkObject } from '../../../interfaces';
 import { CaptureOn, ViewTypes } from './Constants';
 import { Nullable } from '../../../types';
 
+export interface IDisplayScaleParams {
+  dispHeightFactor: number;
+  cameraPosition: number[];
+  cameraDir: number[];
+  isParallel: boolean;
+  rendererPixelDims: number[];
+}
+
 export interface ISelectedData {
   requestCount: number;
   propID: number;
@@ -32,10 +40,12 @@ export interface IRenderingComponents {
 
 /**
  * Extract the rendering components from the given renderer.
- * 
+ *
  * @param {vtkRenderer} renderer The vtkRenderer instance.
  */
-export function extractRenderingComponents(renderer: vtkRenderer): IRenderingComponents;
+export function extractRenderingComponents(
+  renderer: vtkRenderer
+): IRenderingComponents;
 
 /**
  * This method returns the world distance that corresponds to the height of a
@@ -43,14 +53,17 @@ export function extractRenderingComponents(renderer: vtkRenderer): IRenderingCom
  * (vertical) distance that matches a display distance of 30px for a coordinate
  * `coord`, you would compute `30 * getPixelWorldHeightAtCoord(coord)`.
  */
-export function getPixelWorldHeightAtCoord(coord: []): Number;
+export function getPixelWorldHeightAtCoord(
+  coord: [],
+  displayScaleParams: IDisplayScaleParams
+): Number;
 
 export interface vtkWidgetManager extends vtkObject {
   /**
-   * The the captureOn value. 
+   * The the captureOn value.
    * `CaptureOn.MOUSE_MOVE`: captures small region when moving mouse
    * `CaptureOn.MOUSE_RELEASE`: captures entire region when mouse button is released
-   * 
+   *
    * @param {CaptureOn} captureOn
    */
   setCaptureOn(captureOn: CaptureOn): boolean;
@@ -62,7 +75,7 @@ export interface vtkWidgetManager extends vtkObject {
 
   /**
    * The the view type.
-   * 
+   *
    * @param {ViewTypes} type
    */
   setViewType(type: ViewTypes): boolean;
@@ -116,15 +129,15 @@ export interface vtkWidgetManager extends vtkObject {
 
   /**
    * Set the renderer.
-   * 
+   *
    * @param {vtkRenderer} renderer
    */
   setRenderer(renderer: vtkRenderer): void;
 
   /**
-   * Register a widget on the widget manager instance. 
-   * Please note that one should link the widget manager to a view before calling this method. 
-   * 
+   * Register a widget on the widget manager instance.
+   * Please note that one should link the widget manager to a view before calling this method.
+   *
    * @param {vtkAbstractWidgetFactory} widget The abstract widget factory.
    * @param {ViewTypes} [viewType]
    * @param {Object} [initialValues]
@@ -133,7 +146,9 @@ export interface vtkWidgetManager extends vtkObject {
     widget: WidgetFactory,
     viewType?: ViewTypes,
     initialValues?: object
-  ): WidgetFactory extends vtkAbstractWidgetFactory<infer WidgetInstance> ? WidgetInstance : never;
+  ): WidgetFactory extends vtkAbstractWidgetFactory<infer WidgetInstance>
+    ? WidgetInstance
+    : never;
 
   /**
    * Unregister all widgets from the widget manager.
@@ -142,14 +157,14 @@ export interface vtkWidgetManager extends vtkObject {
 
   /**
    * Remove a widget from the widget manager.
-   * 
+   *
    * @param {vtkAbstractWidget | vtkAbstractWidgetFactory} widget The widget to remove
    */
   removeWidget(widget: vtkAbstractWidget | vtkAbstractWidgetFactory<any>): void;
 
   /**
    * Given x and y parameter, get selected data.
-   * 
+   *
    * @param {Number} x
    * @param {Number} y
    */
@@ -162,7 +177,7 @@ export interface vtkWidgetManager extends vtkObject {
 
   /**
    * Given the focus to the given widget instance.
-   * 
+   *
    * @param {vtkAbstractWidget | vtkAbstractWidgetFactory} widget The widget instance which should get the focus.
    */
   grabFocus(widget: vtkAbstractWidget | vtkAbstractWidgetFactory<any>): void;
@@ -211,10 +226,12 @@ export function extend(
 
 /**
  * Method used to create a new instance of vtkCellArray
- * 
+ *
  * @param initialValues for pre-setting some of its content
  */
-export function newInstance(initialValues?: IWidgetManagerInitialValues): vtkWidgetManager;
+export function newInstance(
+  initialValues?: IWidgetManagerInitialValues
+): vtkWidgetManager;
 
 export declare const vtkWidgetManager: {
   newInstance: typeof newInstance;

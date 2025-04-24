@@ -1,9 +1,9 @@
-import { Wrap, Filter } from "./Constants";
+import { Wrap, Filter } from './Constants';
 import vtkOpenGLRenderWindow from '../RenderWindow';
-import { Nullable } from '../../../types';
-import { VtkDataTypes } from "../../../Common/Core/DataArray";
+import { Extent, Nullable } from '../../../types';
+import { VtkDataTypes } from '../../../Common/Core/DataArray';
 import { vtkViewNode } from '../../../Rendering/SceneGraph/ViewNode';
-import { vtkObject } from "../../../interfaces" ;
+import { vtkObject, vtkRange } from '../../../interfaces';
 
 /**
  * Initial values for creating a new instance of vtkOpenGLTexture.
@@ -176,6 +176,23 @@ export interface vtkOpenGLTexture extends vtkViewNode {
   getOpenGLWrapMode(vtktype: Wrap): any;
 
   /**
+   * Updates the data array to match the required data type for OpenGL.
+   *
+   * This function takes the input data and converts it to the appropriate
+   * format required by the OpenGL texture, based on the specified data type.
+   *
+   * @param {string} dataType - The original data type of the input data.
+   * @param {Array} data - The input data array that needs to be updated.
+   * @param {boolean} [depth=false] - Indicates whether the data is a 3D array.
+   * @returns {Array} The updated data array that matches the OpenGL data type.
+   */
+  updateArrayDataTypeForGL(
+    dataType: VtkDataTypes,
+    data: any,
+    depth?: boolean
+  ): void;
+
+  /**
    * Creates a 2D texture from raw data.
    * @param width The width of the texture.
    * @param height The height of the texture.
@@ -185,7 +202,14 @@ export interface vtkOpenGLTexture extends vtkViewNode {
    * @param flip Whether to flip the texture vertically.
    * @returns {boolean} True if the texture was successfully created, false otherwise.
    */
-  create2DFromRaw(width: number, height: number, numComps: number, dataType: VtkDataTypes, data: any, flip: boolean): boolean;
+  create2DFromRaw(
+    width: number,
+    height: number,
+    numComps: number,
+    dataType: VtkDataTypes,
+    data: any,
+    flip: boolean
+  ): boolean;
 
   /**
    * Creates a cube texture from raw data.
@@ -197,7 +221,14 @@ export interface vtkOpenGLTexture extends vtkViewNode {
    * @param flip Whether to flip the texture vertically.
    * @returns {boolean} True if the cube texture was successfully created, false otherwise.
    */
-  createCubeFromRaw(width: number, height: number, numComps: number, dataType: VtkDataTypes, data: any, flip: boolean): boolean;
+  createCubeFromRaw(
+    width: number,
+    height: number,
+    numComps: number,
+    dataType: VtkDataTypes,
+    data: any,
+    flip: boolean
+  ): boolean;
 
   /**
    * Creates a 2D texture from an image.
@@ -213,10 +244,19 @@ export interface vtkOpenGLTexture extends vtkViewNode {
    * @param numComps The number of components in the texture.
    * @param dataType The data type of the texture.
    * @param data The raw data for the texture.
-   * @param preferSizeOverAccuracy Whether to prefer texture size over accuracy.
+   * @param [preferSizeOverAccuracy=false] Whether to prefer texture size over accuracy. Defaults to false.
+   * @param [ranges] The precomputed ranges of the data (optional). Provided to prevent computation of the data ranges.
    * @returns {boolean} True if the texture was successfully created, false otherwise.
    */
-  create2DFilterableFromRaw(width: number, height: number, numComps: number, dataType: VtkDataTypes, data: any, preferSizeOverAccuracy: boolean): boolean;
+  create2DFilterableFromRaw(
+    width: number,
+    height: number,
+    numComps: number,
+    dataType: VtkDataTypes,
+    data: any,
+    preferSizeOverAccuracy?: boolean,
+    ranges?: vtkRange[]
+  ): boolean;
 
   /**
    * Creates a 2D filterable texture from a data array, with a preference for size over accuracy if necessary.
@@ -226,22 +266,42 @@ export interface vtkOpenGLTexture extends vtkViewNode {
    * @param preferSizeOverAccuracy Whether to prefer texture size over accuracy.
    * @returns {boolean} True if the texture was successfully created, false otherwise.
    */
-  create2DFilterableFromDataArray(width: number, height: number, dataArray: any, preferSizeOverAccuracy: boolean): boolean;
+  create2DFilterableFromDataArray(
+    width: number,
+    height: number,
+    dataArray: any,
+    preferSizeOverAccuracy: boolean
+  ): boolean;
 
   /**
    * Creates a 3D texture from raw data.
+   *
+   * updatedExtents is currently incompatible with webgl1, since there's no extent scaling.
+   *
    * @param width The width of the texture.
    * @param height The height of the texture.
    * @param depth The depth of the texture.
    * @param numComps The number of components in the texture.
    * @param dataType The data type of the texture.
    * @param data The raw data for the texture.
+   * @param updatedExtents Only update the specified extents (default: [])
    * @returns {boolean} True if the texture was successfully created, false otherwise.
    */
-  create3DFromRaw(width: number, height: number, depth: number, numComps: number, dataType: VtkDataTypes, data: any): boolean;
+  create3DFromRaw(
+    width: number,
+    height: number,
+    depth: number,
+    numComps: number,
+    dataType: VtkDataTypes,
+    data: any,
+    updatedExtents?: Extent[]
+  ): boolean;
 
   /**
    * Creates a 3D filterable texture from raw data, with a preference for size over accuracy if necessary.
+   *
+   * updatedExtents is currently incompatible with webgl1, since there's no extent scaling.
+   *
    * @param width The width of the texture.
    * @param height The height of the texture.
    * @param depth The depth of the texture.
@@ -249,20 +309,45 @@ export interface vtkOpenGLTexture extends vtkViewNode {
    * @param dataType The data type of the texture.
    * @param values The raw data for the texture.
    * @param preferSizeOverAccuracy Whether to prefer texture size over accuracy.
-   * @returns {boolean} True if the texture was successfully created, false otherwise.
+   * @param [ranges] The precomputed ranges of the data (optional). Provided to
+   * @param updatedExtents Only update the specified extents (default: [])
+   * prevent computation of the data ranges.
+   * @returns {boolean} True if the texture was successfully created, false
+   * otherwise.
    */
-  create3DFilterableFromRaw(width: number, height: number, depth: number, numComps: number, dataType: VtkDataTypes, values: any, preferSizeOverAccuracy: boolean): boolean;
+  create3DFilterableFromRaw(
+    width: number,
+    height: number,
+    depth: number,
+    numComps: number,
+    dataType: VtkDataTypes,
+    values: any,
+    preferSizeOverAccuracy: boolean,
+    ranges?: vtkRange[],
+    updatedExtents?: Extent[]
+  ): boolean;
 
   /**
    * Creates a 3D filterable texture from a data array, with a preference for size over accuracy if necessary.
+   *
+   * updatedExtents is currently incompatible with webgl1, since there's no extent scaling.
+   *
    * @param width The width of the texture.
    * @param height The height of the texture.
    * @param depth The depth of the texture.
    * @param dataArray The data array to use for the texture.
    * @param preferSizeOverAccuracy Whether to prefer texture size over accuracy.
+   * @param updatedExtents Only update the specified extents (default: [])
    * @returns {boolean} True if the texture was successfully created, false otherwise.
    */
-  create3DFilterableFromDataArray(width: number, height: number, depth: number, dataArray: any, preferSizeOverAccuracy: boolean): boolean;
+  create3DFilterableFromDataArray(
+    width: number,
+    height: number,
+    depth: number,
+    dataArray: any,
+    preferSizeOverAccuracy: boolean,
+    updatedExtents?: Extent[]
+  ): boolean;
 
   /**
    * Sets the OpenGL render window in which the texture will be used.
@@ -277,6 +362,14 @@ export interface vtkOpenGLTexture extends vtkViewNode {
    */
   getMaximumTextureSize(ctx: any): number;
 
+  /**
+   * Public API to disable half float usage.
+   * Half float is automatically enabled when creating the texture,
+   * but users may want to disable it in certain cases
+   * (e.g., streaming data where the full range is not yet available).
+   * @param useHalfFloat - whether to use half float
+   */
+  enableUseHalfFloat(useHalfFloat: boolean): void;
 }
 
 /**
@@ -285,21 +378,27 @@ export interface vtkOpenGLTexture extends vtkViewNode {
  * @param model The model to use.
  * @param initialValues The initial values to apply.
  */
-export function extend(publicAPI: object, model: object, initialValues?: ITextureInitialValues): void;
+export function extend(
+  publicAPI: object,
+  model: object,
+  initialValues?: ITextureInitialValues
+): void;
 
 /**
  * Creates a new instance of vtkOpenGLTexture with the given initial values.
  * @param initialValues The initial values to use.
  * @returns The new instance.
  */
-export function newInstance(initialValues?: ITextureInitialValues): vtkOpenGLTexture;
+export function newInstance(
+  initialValues?: ITextureInitialValues
+): vtkOpenGLTexture;
 
 /**
  * vtkOpenGLTexture static API.
  */
 export declare const vtkOpenGLTexture: {
-  newInstance: typeof newInstance,
-  extend: typeof extend,
+  newInstance: typeof newInstance;
+  extend: typeof extend;
 };
 
 export default vtkOpenGLTexture;

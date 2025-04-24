@@ -24,6 +24,11 @@ import {
 } from 'vtk.js/Sources/Rendering/Core/VolumeProperty/Constants';
 import { BlendMode } from 'vtk.js/Sources/Rendering/Core/VolumeMapper/Constants';
 
+import {
+  getTransferFunctionHash,
+  getImageDataHash,
+} from 'vtk.js/Sources/Rendering/OpenGL/RenderWindow/resourceSharingHelper';
+
 import vtkVolumeVS from 'vtk.js/Sources/Rendering/OpenGL/glsl/vtkVolumeVS.glsl';
 import vtkVolumeFS from 'vtk.js/Sources/Rendering/OpenGL/glsl/vtkVolumeFS.glsl';
 
@@ -34,10 +39,6 @@ const { vtkWarningMacro, vtkErrorMacro } = macro;
 // ----------------------------------------------------------------------------
 // helper methods
 // ----------------------------------------------------------------------------
-
-function computeFnToString(pwfun, useIComps, numberOfComponents) {
-  return pwfun ? `${pwfun.getMTime()}-${useIComps}-${numberOfComponents}` : '0';
-}
 
 function getColorCodeFromPreset(colorMixPreset) {
   switch (colorMixPreset) {
@@ -123,6 +124,17 @@ function vtkOpenGLVolumeMapper(publicAPI, model) {
   // Set our className
   model.classHierarchy.push('vtkOpenGLVolumeMapper');
 
+  function unregisterGraphicsResources(renderWindow) {
+    [
+      model._scalars,
+      model._scalarOpacityFunc,
+      model._colorTransferFunc,
+      model._labelOutlineThicknessArray,
+    ].forEach((coreObject) =>
+      renderWindow.unregisterGraphicsResourceUser(coreObject, publicAPI)
+    );
+  }
+
   publicAPI.buildPass = () => {
     model.zBufferTexture = null;
   };
@@ -144,21 +156,22 @@ function vtkOpenGLVolumeMapper(publicAPI, model) {
   // Renders myself
   publicAPI.volumePass = (prepass, renderPass) => {
     if (prepass) {
-      model._openGLRenderWindow = publicAPI.getFirstAncestorOfType(
+      const oldOglRenderWindow = model._openGLRenderWindow;
+      model._openGLRenderWindow = publicAPI.getLastAncestorOfType(
         'vtkOpenGLRenderWindow'
       );
+      if (
+        oldOglRenderWindow &&
+        !oldOglRenderWindow.isDeleted() &&
+        oldOglRenderWindow !== model._openGLRenderWindow
+      ) {
+        // Unregister the mapper when the render window changes
+        unregisterGraphicsResources(oldOglRenderWindow);
+      }
       model.context = model._openGLRenderWindow.getContext();
       model.tris.setOpenGLRenderWindow(model._openGLRenderWindow);
       model.jitterTexture.setOpenGLRenderWindow(model._openGLRenderWindow);
       model.framebuffer.setOpenGLRenderWindow(model._openGLRenderWindow);
-
-      // Per Component?
-      model.scalarTexture.setOpenGLRenderWindow(model._openGLRenderWindow);
-      model.colorTexture.setOpenGLRenderWindow(model._openGLRenderWindow);
-      model.opacityTexture.setOpenGLRenderWindow(model._openGLRenderWindow);
-      model.labelOutlineThicknessTexture.setOpenGLRenderWindow(
-        model._openGLRenderWindow
-      );
 
       model.openGLVolume = publicAPI.getFirstAncestorOfType('vtkOpenGLVolume');
       const actor = model.openGLVolume.getRenderable();
@@ -203,12 +216,24 @@ function vtkOpenGLVolumeMapper(publicAPI, model) {
       ).result;
     }
 
-    const vtkImageLabelOutline = actorProps.getUseLabelOutline();
+    const vtkImageLabelOutline = publicAPI.isLabelmapOutlineRequired(actor);
     if (vtkImageLabelOutline === true) {
       FSSource = vtkShaderProgram.substitute(
         FSSource,
         '//VTK::ImageLabelOutlineOn',
         '#define vtkImageLabelOutlineOn'
+      ).result;
+    }
+
+    const LabelEdgeProjection =
+      model.renderable.getBlendMode() ===
+      BlendMode.LABELMAP_EDGE_PROJECTION_BLEND;
+
+    if (LabelEdgeProjection) {
+      FSSource = vtkShaderProgram.substitute(
+        FSSource,
+        '//VTK::LabelEdgeProjectionOn',
+        '#define vtkLabelEdgeProjectionOn'
       ).result;
     }
 
@@ -577,7 +602,7 @@ function vtkOpenGLVolumeMapper(publicAPI, model) {
       iComps: actorProps.getIndependentComponents(),
       colorMixPreset: actorProps.getColorMixPreset(),
       interpolationType: actorProps.getInterpolationType(),
-      useLabelOutline: actorProps.getUseLabelOutline(),
+      useLabelOutline: publicAPI.isLabelmapOutlineRequired(actor),
       numComp,
       maxSamples,
       useGradientOpacity: actorProps.getUseGradientOpacity(0),
@@ -681,34 +706,38 @@ function vtkOpenGLVolumeMapper(publicAPI, model) {
     const volInfo = model.scalarTexture.getVolumeInfo();
     const ipScalarRange = model.renderable.getIpScalarRange();
 
-    const minVals = [];
-    const maxVals = [];
-    for (let i = 0; i < 4; i++) {
-      // convert iprange from 0-1 into data range values
-      minVals[i] =
-        ipScalarRange[0] * volInfo.dataComputedScale[i] +
-        volInfo.dataComputedOffset[i];
-      maxVals[i] =
-        ipScalarRange[1] * volInfo.dataComputedScale[i] +
-        volInfo.dataComputedOffset[i];
-      // convert data ranges into texture values
-      minVals[i] = (minVals[i] - volInfo.offset[i]) / volInfo.scale[i];
-      maxVals[i] = (maxVals[i] - volInfo.offset[i]) / volInfo.scale[i];
+    // In some situations, we might not have computed the scale and offset
+    // for the data range, or it might not be needed.
+    if (volInfo?.dataComputedScale?.length) {
+      const minVals = [];
+      const maxVals = [];
+      for (let i = 0; i < 4; i++) {
+        // convert iprange from 0-1 into data range values
+        minVals[i] =
+          ipScalarRange[0] * volInfo.dataComputedScale[i] +
+          volInfo.dataComputedOffset[i];
+        maxVals[i] =
+          ipScalarRange[1] * volInfo.dataComputedScale[i] +
+          volInfo.dataComputedOffset[i];
+        // convert data ranges into texture values
+        minVals[i] = (minVals[i] - volInfo.offset[i]) / volInfo.scale[i];
+        maxVals[i] = (maxVals[i] - volInfo.offset[i]) / volInfo.scale[i];
+      }
+      program.setUniform4f(
+        'ipScalarRangeMin',
+        minVals[0],
+        minVals[1],
+        minVals[2],
+        minVals[3]
+      );
+      program.setUniform4f(
+        'ipScalarRangeMax',
+        maxVals[0],
+        maxVals[1],
+        maxVals[2],
+        maxVals[3]
+      );
     }
-    program.setUniform4f(
-      'ipScalarRangeMin',
-      minVals[0],
-      minVals[1],
-      minVals[2],
-      minVals[3]
-    );
-    program.setUniform4f(
-      'ipScalarRangeMax',
-      maxVals[0],
-      maxVals[1],
-      maxVals[2],
-      maxVals[3]
-    );
 
     // if we have a zbuffer texture then set it
     if (model.zBufferTexture !== null) {
@@ -838,6 +867,7 @@ function vtkOpenGLVolumeMapper(publicAPI, model) {
     vec3.divide(vctoijk, vctoijk, vsize);
     program.setUniform3f('vVCToIJK', vctoijk[0], vctoijk[1], vctoijk[2]);
     program.setUniform3i('volumeDimensions', dims[0], dims[1], dims[2]);
+    program.setUniform3f('volumeSpacings', spc[0], spc[1], spc[2]);
 
     if (!model._openGLRenderWindow.getWebgl2()) {
       const volInfo = model.scalarTexture.getVolumeInfo();
@@ -890,7 +920,7 @@ function vtkOpenGLVolumeMapper(publicAPI, model) {
       program.setUniformf(`vPlaneDistance${i}`, dist);
     }
 
-    if (actor.getProperty().getUseLabelOutline()) {
+    if (publicAPI.isLabelmapOutlineRequired(actor)) {
       const image = model.currentInput;
       const worldToIndex = image.getWorldToIndex();
 
@@ -1135,7 +1165,7 @@ function vtkOpenGLVolumeMapper(publicAPI, model) {
       }
     }
 
-    const vtkImageLabelOutline = actor.getProperty().getUseLabelOutline();
+    const vtkImageLabelOutline = publicAPI.isLabelmapOutlineRequired(actor);
     if (vtkImageLabelOutline === true) {
       const labelOutlineOpacity = actor.getProperty().getLabelOutlineOpacity();
       program.setUniformf('outlineOpacity', labelOutlineOpacity);
@@ -1190,12 +1220,20 @@ function vtkOpenGLVolumeMapper(publicAPI, model) {
   };
 
   // unsubscribe from our listeners
-  publicAPI.delete = macro.chain(() => {
-    if (model._animationRateSubscription) {
-      model._animationRateSubscription.unsubscribe();
-      model._animationRateSubscription = null;
-    }
-  }, publicAPI.delete);
+  publicAPI.delete = macro.chain(
+    () => {
+      if (model._animationRateSubscription) {
+        model._animationRateSubscription.unsubscribe();
+        model._animationRateSubscription = null;
+      }
+    },
+    () => {
+      if (model._openGLRenderWindow) {
+        unregisterGraphicsResources(model._openGLRenderWindow);
+      }
+    },
+    publicAPI.delete
+  );
 
   publicAPI.getRenderTargetSize = () => {
     if (model._useSmallViewport) {
@@ -1476,7 +1514,10 @@ function vtkOpenGLVolumeMapper(publicAPI, model) {
       model.VBOBuildTime.getMTime() < actor.getMTime() ||
       model.VBOBuildTime.getMTime() < model.renderable.getMTime() ||
       model.VBOBuildTime.getMTime() < actor.getProperty().getMTime() ||
-      model.VBOBuildTime.getMTime() < model.currentInput.getMTime()
+      model.VBOBuildTime.getMTime() < model.currentInput.getMTime() ||
+      !model.scalarTexture?.getHandle() ||
+      !model.colorTexture?.getHandle() ||
+      !model.labelOutlineThicknessTexture?.getHandle()
     ) {
       return true;
     }
@@ -1492,12 +1533,6 @@ function vtkOpenGLVolumeMapper(publicAPI, model) {
     const scalars = image.getPointData() && image.getPointData().getScalars();
     if (!scalars) {
       return;
-    }
-    if (model._scalars !== scalars) {
-      model._openGLRenderWindow.releaseGraphicsResourcesForObject(
-        model._scalars
-      );
-      model._scalars = scalars;
     }
 
     const vprop = actor.getProperty();
@@ -1525,18 +1560,20 @@ function vtkOpenGLVolumeMapper(publicAPI, model) {
     const scalarOpacityFunc = vprop.getScalarOpacity();
     const opTex =
       model._openGLRenderWindow.getGraphicsResourceForObject(scalarOpacityFunc);
-    let toString = computeFnToString(
+    let toString = getTransferFunctionHash(
       scalarOpacityFunc,
       useIndependentComps,
       numIComps
     );
-    const reBuildOp =
-      !opTex.vtkObj ||
-      opTex.hash !== toString ||
-      model.opacityTextureString !== toString;
+    const reBuildOp = !opTex?.oglObject || opTex.hash !== toString;
     if (reBuildOp) {
+      model.opacityTexture = vtkOpenGLTexture.newInstance();
+      model.opacityTexture.setOpenGLRenderWindow(model._openGLRenderWindow);
       // rebuild opacity tfun?
-      const oWidth = 1024;
+      let oWidth = model.renderable.getOpacityTextureWidth();
+      if (oWidth <= 0) {
+        oWidth = model.context.getParameter(model.context.MAX_TEXTURE_SIZE);
+      }
       const oSize = oWidth * 2 * numIComps;
       const ofTable = new Float32Array(oSize);
       const tmpTable = new Float32Array(oWidth);
@@ -1557,7 +1594,6 @@ function vtkOpenGLVolumeMapper(publicAPI, model) {
         }
       }
 
-      model.opacityTexture.releaseGraphicsResources(model._openGLRenderWindow);
       model.opacityTexture.resetFormatAndType();
       model.opacityTexture.setMinificationFilter(Filter.LINEAR);
       model.opacityTexture.setMagnificationFilter(Filter.LINEAR);
@@ -1591,34 +1627,45 @@ function vtkOpenGLVolumeMapper(publicAPI, model) {
           oTable
         );
       }
-      model.opacityTextureString = toString;
       if (scalarOpacityFunc) {
         model._openGLRenderWindow.setGraphicsResourceForObject(
           scalarOpacityFunc,
           model.opacityTexture,
-          model.opacityTextureString
+          toString
         );
+        if (scalarOpacityFunc !== model._scalarOpacityFunc) {
+          model._openGLRenderWindow.registerGraphicsResourceUser(
+            scalarOpacityFunc,
+            publicAPI
+          );
+          model._openGLRenderWindow.unregisterGraphicsResourceUser(
+            model._scalarOpacityFunc,
+            publicAPI
+          );
+        }
+        model._scalarOpacityFunc = scalarOpacityFunc;
       }
     } else {
-      model.opacityTexture = opTex.vtkObj;
-      model.opacityTextureString = opTex.hash;
+      model.opacityTexture = opTex.oglObject;
     }
 
     // rebuild color tfun?
     const colorTransferFunc = vprop.getRGBTransferFunction();
-    toString = computeFnToString(
+    toString = getTransferFunctionHash(
       colorTransferFunc,
       useIndependentComps,
       numIComps
     );
     const cTex =
       model._openGLRenderWindow.getGraphicsResourceForObject(colorTransferFunc);
-    const reBuildC =
-      !cTex?.vtkObj ||
-      cTex?.hash !== toString ||
-      model.colorTextureString !== toString;
+    const reBuildC = !cTex?.oglObject?.getHandle() || cTex?.hash !== toString;
     if (reBuildC) {
-      const cWidth = 1024;
+      model.colorTexture = vtkOpenGLTexture.newInstance();
+      model.colorTexture.setOpenGLRenderWindow(model._openGLRenderWindow);
+      let cWidth = model.renderable.getColorTextureWidth();
+      if (cWidth <= 0) {
+        cWidth = model.context.getParameter(model.context.MAX_TEXTURE_SIZE);
+      }
       const cSize = cWidth * 2 * numIComps * 3;
       const cTable = new Uint8ClampedArray(cSize);
       const tmpTable = new Float32Array(cWidth * 3);
@@ -1633,7 +1680,6 @@ function vtkOpenGLVolumeMapper(publicAPI, model) {
         }
       }
 
-      model.colorTexture.releaseGraphicsResources(model._openGLRenderWindow);
       model.colorTexture.resetFormatAndType();
       model.colorTexture.setMinificationFilter(Filter.LINEAR);
       model.colorTexture.setMagnificationFilter(Filter.LINEAR);
@@ -1645,55 +1691,91 @@ function vtkOpenGLVolumeMapper(publicAPI, model) {
         VtkDataTypes.UNSIGNED_CHAR,
         cTable
       );
-      model.colorTextureString = toString;
       if (colorTransferFunc) {
         model._openGLRenderWindow.setGraphicsResourceForObject(
           colorTransferFunc,
           model.colorTexture,
-          model.colorTextureString
+          toString
         );
+        if (colorTransferFunc !== model._colorTransferFunc) {
+          model._openGLRenderWindow.registerGraphicsResourceUser(
+            colorTransferFunc,
+            publicAPI
+          );
+          model._openGLRenderWindow.unregisterGraphicsResourceUser(
+            model._colorTransferFunc,
+            publicAPI
+          );
+        }
+        model._colorTransferFunc = colorTransferFunc;
       }
     } else {
-      model.colorTexture = cTex.vtkObj;
-      model.colorTextureString = cTex.hash;
+      model.colorTexture = cTex.oglObject;
     }
 
     publicAPI.updateLabelOutlineThicknessTexture(actor);
 
     const tex = model._openGLRenderWindow.getGraphicsResourceForObject(scalars);
     // rebuild the scalarTexture if the data has changed
-    toString = `${image.getMTime()}A${scalars.getMTime()}`;
-    const reBuildTex =
-      !tex?.vtkObj ||
-      tex?.hash !== toString ||
-      model.scalarTextureString !== toString;
-    if (reBuildTex) {
+    toString = getImageDataHash(image, scalars);
+    const reBuildTex = !tex?.oglObject?.getHandle() || tex?.hash !== toString;
+    const updatedExtents = model.renderable.getUpdatedExtents();
+    const hasUpdatedExtents = !!updatedExtents.length;
+
+    if (reBuildTex && !hasUpdatedExtents) {
+      model.scalarTexture = vtkOpenGLTexture.newInstance();
+      model.scalarTexture.setOpenGLRenderWindow(model._openGLRenderWindow);
       // Build the textures
       const dims = image.getDimensions();
       // Use norm16 for scalar texture if the extension is available
       model.scalarTexture.setOglNorm16Ext(
         model.context.getExtension('EXT_texture_norm16')
       );
-      model.scalarTexture.releaseGraphicsResources(model._openGLRenderWindow);
       model.scalarTexture.resetFormatAndType();
+
+      model.scalarTexture.create3DFilterableFromDataArray(
+        dims[0],
+        dims[1],
+        dims[2],
+        scalars
+      );
+
+      if (scalars) {
+        model._openGLRenderWindow.setGraphicsResourceForObject(
+          scalars,
+          model.scalarTexture,
+          toString
+        );
+        if (scalars !== model._scalars) {
+          model._openGLRenderWindow.registerGraphicsResourceUser(
+            scalars,
+            publicAPI
+          );
+          model._openGLRenderWindow.unregisterGraphicsResourceUser(
+            model._scalars,
+            publicAPI
+          );
+        }
+        model._scalars = scalars;
+      }
+    } else {
+      model.scalarTexture = tex.oglObject;
+    }
+
+    if (hasUpdatedExtents) {
+      // If hasUpdatedExtents, then the texture is partially updated.
+      // clear the array to acknowledge the update.
+      model.renderable.setUpdatedExtents([]);
+
+      const dims = image.getDimensions();
       model.scalarTexture.create3DFilterableFromDataArray(
         dims[0],
         dims[1],
         dims[2],
         scalars,
-        model.renderable.getPreferSizeOverAccuracy()
+        false,
+        updatedExtents
       );
-      model.scalarTextureString = toString;
-      if (scalars) {
-        model._openGLRenderWindow.setGraphicsResourceForObject(
-          scalars,
-          model.scalarTexture,
-          model.scalarTextureString
-        );
-      }
-    } else {
-      model.scalarTexture = tex.vtkObj;
-      model.scalarTextureString = tex.hash;
     }
 
     if (!model.tris.getCABO().getElementCount()) {
@@ -1773,13 +1855,17 @@ function vtkOpenGLVolumeMapper(publicAPI, model) {
     // or not
     const toString = `${labelOutlineThicknessArray.join('-')}`;
 
-    const reBuildL =
-      !lTex?.vtkObj ||
-      lTex?.hash !== toString ||
-      model.labelOutlineThicknessTextureString !== toString;
+    const reBuildL = !lTex?.oglObject?.getHandle() || lTex?.hash !== toString;
 
     if (reBuildL) {
-      const lWidth = 1024;
+      model.labelOutlineThicknessTexture = vtkOpenGLTexture.newInstance();
+      model.labelOutlineThicknessTexture.setOpenGLRenderWindow(
+        model._openGLRenderWindow
+      );
+      let lWidth = model.renderable.getLabelOutlineTextureWidth();
+      if (lWidth <= 0) {
+        lWidth = model.context.getParameter(model.context.MAX_TEXTURE_SIZE);
+      }
       const lHeight = 1;
       const lSize = lWidth * lHeight;
       const lTable = new Uint8Array(lSize);
@@ -1787,15 +1873,14 @@ function vtkOpenGLVolumeMapper(publicAPI, model) {
       // Assuming labelOutlineThicknessArray contains the thickness for each segment
       for (let i = 0; i < lWidth; ++i) {
         // Retrieve the thickness value for the current segment index.
-        // If the value is undefined, null, or 0, use the first element's value as a default.
+        // If the value is undefined, use the first element's value as a default, otherwise use the value (even if 0)
         const thickness =
-          labelOutlineThicknessArray[i] || labelOutlineThicknessArray[0];
+          typeof labelOutlineThicknessArray[i] !== 'undefined'
+            ? labelOutlineThicknessArray[i]
+            : labelOutlineThicknessArray[0];
+
         lTable[i] = thickness;
       }
-
-      model.labelOutlineThicknessTexture.releaseGraphicsResources(
-        model._openGLRenderWindow
-      );
 
       model.labelOutlineThicknessTexture.resetFormatAndType();
       model.labelOutlineThicknessTexture.setMinificationFilter(Filter.NEAREST);
@@ -1810,18 +1895,37 @@ function vtkOpenGLVolumeMapper(publicAPI, model) {
         lTable
       );
 
-      model.labelOutlineThicknessTextureString = toString;
       if (labelOutlineThicknessArray) {
         model._openGLRenderWindow.setGraphicsResourceForObject(
           labelOutlineThicknessArray,
           model.labelOutlineThicknessTexture,
-          model.labelOutlineThicknessTextureString
+          toString
         );
+        if (labelOutlineThicknessArray !== model._labelOutlineThicknessArray) {
+          model._openGLRenderWindow.registerGraphicsResourceUser(
+            labelOutlineThicknessArray,
+            publicAPI
+          );
+          model._openGLRenderWindow.unregisterGraphicsResourceUser(
+            model._labelOutlineThicknessArray,
+            publicAPI
+          );
+        }
+        model._labelOutlineThicknessArray = labelOutlineThicknessArray;
       }
     } else {
-      model.labelOutlineThicknessTexture = lTex.vtkObj;
-      model.labelOutlineThicknessTextureString = lTex.hash;
+      model.labelOutlineThicknessTexture = lTex.oglObject;
     }
+  };
+
+  publicAPI.isLabelmapOutlineRequired = (actor) => {
+    const prop = actor.getProperty();
+    const renderable = model.renderable;
+
+    return (
+      prop.getUseLabelOutline() ||
+      renderable.getBlendMode() === BlendMode.LABELMAP_EDGE_PROJECTION_BLEND
+    );
   };
 }
 
@@ -1833,7 +1937,6 @@ const DEFAULT_VALUES = {
   context: null,
   VBOBuildTime: null,
   scalarTexture: null,
-  scalarTextureString: null,
   opacityTexture: null,
   opacityTextureString: null,
   colorTexture: null,
@@ -1857,7 +1960,10 @@ const DEFAULT_VALUES = {
   projectionToView: null,
   avgWindowArea: 0.0,
   avgFrameTime: 0.0,
-  _scalars: null,
+  // _scalars: null,
+  // _scalarOpacityFunc: null,
+  // _colorTransferFunc: null,
+  // _labelOutlineThicknessArray: null,
 };
 
 // ----------------------------------------------------------------------------
@@ -1878,13 +1984,9 @@ export function extend(publicAPI, model, initialValues = {}) {
   macro.obj(model.VBOBuildTime, { mtime: 0 });
 
   model.tris = vtkHelper.newInstance();
-  model.scalarTexture = vtkOpenGLTexture.newInstance();
-  model.opacityTexture = vtkOpenGLTexture.newInstance();
-  model.colorTexture = vtkOpenGLTexture.newInstance();
   model.jitterTexture = vtkOpenGLTexture.newInstance();
   model.jitterTexture.setWrapS(Wrap.REPEAT);
   model.jitterTexture.setWrapT(Wrap.REPEAT);
-  model.labelOutlineThicknessTexture = vtkOpenGLTexture.newInstance();
   model.framebuffer = vtkOpenGLFramebuffer.newInstance();
 
   model.idxToView = mat4.identity(new Float64Array(16));
